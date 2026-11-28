@@ -606,12 +606,14 @@ impl QueryPlanner {
             SubgraphOperationCompression::Disabled
         };
         let client_labels = Arc::new(client_labels);
+        let fetch_id_generator = Arc::new(FetchIdGenerator::new());
         let mut processor = FetchDependencyGraphToQueryPlanProcessor::new(
             normalized_operation.variables.clone(),
             normalized_operation.directives.clone(),
             operation_compression,
             operation.name.clone(),
             client_labels.as_ref().clone(),
+            fetch_id_generator.clone(),
         );
         let mut parameters = QueryPlanningParameters {
             supergraph_schema: self.supergraph_schema.clone(),
@@ -633,7 +635,7 @@ impl QueryPlanner {
             ),
             connector_index: self.connector_index.clone(),
             check_for_cooperative_cancellation: options.check_for_cooperative_cancellation,
-            fetch_id_generator: Arc::new(FetchIdGenerator::new()),
+            fetch_id_generator,
             disabled_subgraphs: self
                 .federated_query_graph
                 .subgraphs()
@@ -678,6 +680,7 @@ impl QueryPlanner {
                 TopLevelPlanNode::Subscription(crate::query_plan::SubscriptionNode {
                     primary: root_node,
                     rest: None,
+                    node_id: parameters.fetch_id_generator.next_node_id(),
                 }),
             ),
             Some(PlanNode::Sequence(root_node)) if is_subscription => {
@@ -690,11 +693,13 @@ impl QueryPlanner {
                 };
                 let rest = PlanNode::Sequence(SequenceNode {
                     nodes: rest.to_vec(),
+                    node_id: parameters.fetch_id_generator.next_node_id(),
                 });
                 Some(TopLevelPlanNode::Subscription(
                     crate::query_plan::SubscriptionNode {
                         primary,
                         rest: Some(Box::new(rest)),
+                        node_id: parameters.fetch_id_generator.next_node_id(),
                     },
                 ))
             }
@@ -1046,7 +1051,10 @@ fn compute_plan_internal(
         let plan = match nodes.len() {
             0 => None,
             1 => Some(nodes.remove(0)),
-            _ => Some(PlanNode::Sequence(SequenceNode { nodes })),
+            _ => Some(PlanNode::Sequence(SequenceNode {
+                nodes,
+                node_id: parameters.fetch_id_generator.next_node_id(),
+            })),
         };
         (plan, vec![], None, f64::NAN)
     } else if root_kind == SchemaRootDefinitionKind::Mutation {
@@ -1132,9 +1140,11 @@ fn compute_plan_for_defer_conditionals(
     non_local_selection_state: &mut Option<non_local_selections_estimation::State>,
     resolver_cache: &mut ConditionResolverCache,
 ) -> Result<(Option<PlanNode>, QueryPlanCost), FederationError> {
+    let ids = parameters.fetch_id_generator.clone();
     generate_condition_nodes(
         parameters.operation.clone(),
         defer_conditions.iter(),
+        &ids,
         &mut |op| {
             parameters.operation = op;
             compute_plan_internal(
@@ -1151,6 +1161,7 @@ fn compute_plan_for_defer_conditionals(
 fn generate_condition_nodes<'a>(
     op: Arc<Operation>,
     mut conditions: impl Clone + Iterator<Item = (&'a Name, &'a IndexSet<String>)>,
+    ids: &FetchIdGenerator,
     on_final_operation: &mut impl FnMut(
         Arc<Operation>,
     ) -> Result<(Option<PlanNode>, f64), FederationError>,
@@ -1161,16 +1172,18 @@ fn generate_condition_nodes<'a>(
             let else_op = Arc::unwrap_or_clone(op.clone()).reduce_defer(labels)?;
             let if_op = op;
             let (if_node, if_cost) =
-                generate_condition_nodes(if_op, conditions.clone(), on_final_operation)?;
+                generate_condition_nodes(if_op, conditions.clone(), ids, on_final_operation)?;
             let (else_node, else_cost) = generate_condition_nodes(
                 Arc::new(else_op),
                 conditions.clone(),
+                ids,
                 on_final_operation,
             )?;
             let node = ConditionNode {
                 condition_variable: cond.clone(),
                 if_clause: if_node.map(Box::new),
                 else_clause: else_node.map(Box::new),
+                node_id: ids.next_node_id(),
             };
             Ok((
                 Some(PlanNode::Condition(Box::new(node))),

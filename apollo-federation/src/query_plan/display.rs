@@ -51,7 +51,11 @@ impl PlanNode {
 
 impl SubscriptionNode {
     fn write_indented(&self, state: &mut State<'_, '_>) -> fmt::Result {
-        let Self { primary, rest } = self;
+        let Self {
+            primary,
+            rest,
+            node_id: _,
+        } = self;
         state.write("Subscription {")?;
         state.indent()?;
 
@@ -87,6 +91,7 @@ impl FetchNode {
             operation_name: _,
             operation_kind: _,
             output_rewrites: _,
+            node_id: _,
         } = self;
         state.write(format_args!("Fetch(service: {subgraph_name:?}"))?;
         if let Some(id) = id {
@@ -112,7 +117,7 @@ impl FetchNode {
 
 impl SequenceNode {
     fn write_indented(&self, state: &mut State<'_, '_>) -> fmt::Result {
-        let Self { nodes } = self;
+        let Self { nodes, node_id: _ } = self;
         state.write("Sequence {")?;
 
         write_indented_lines(state, nodes, |state, node| node.write_indented(state))?;
@@ -123,7 +128,7 @@ impl SequenceNode {
 
 impl ParallelNode {
     fn write_indented(&self, state: &mut State<'_, '_>) -> fmt::Result {
-        let Self { nodes } = self;
+        let Self { nodes, node_id: _ } = self;
         state.write("Parallel {")?;
 
         write_indented_lines(state, nodes, |state, node| node.write_indented(state))?;
@@ -185,6 +190,7 @@ impl ConditionNode {
             condition_variable,
             if_clause,
             else_clause,
+            node_id: _,
         } = self;
         match (if_clause, else_clause) {
             (Some(if_clause), Some(else_clause)) => {
@@ -235,7 +241,11 @@ impl ConditionNode {
 
 impl DeferNode {
     fn write_indented(&self, state: &mut State<'_, '_>) -> fmt::Result {
-        let Self { primary, deferred } = self;
+        let Self {
+            primary,
+            deferred,
+            node_id: _,
+        } = self;
         state.write("Defer {")?;
         state.indent()?;
 

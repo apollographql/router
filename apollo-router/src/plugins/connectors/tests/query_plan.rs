@@ -100,7 +100,8 @@ async fn basic_batch() {
                     "is_authenticated": false,
                     "scopes": [],
                     "policies": []
-                  }
+                  },
+                  "nodeId": 0
                 },
                 {
                   "kind": "Flatten",
@@ -146,12 +147,15 @@ async fn basic_batch() {
                           "is_authenticated": false,
                           "scopes": [],
                           "policies": []
-                        }
+                        },
+                        "nodeId": 1
                       }
                     }
-                  ]
+                  ],
+                  "nodeId": 2
                 }
-              ]
+              ],
+              "nodeId": 3
             }
           },
           "text": "QueryPlan {\n  Sequence {\n    Fetch(service: \"connectors.json http: GET /users\") {\n      {\n        users {\n          __typename\n          id\n        }\n      }\n    },\n    Flatten(path: \"users.@\") {\n      Fetch(service: \"[BATCH] connectors.json http: POST /users-batch\") {\n        {\n          ... on User {\n            __typename\n            id\n          }\n        } =>\n        {\n          ... on User {\n            name\n            username\n          }\n        }\n      },\n    },\n  },\n}"

@@ -1458,3 +1458,112 @@ fn rebase_non_intersecting_without_dropping_inline_fragment_due_to_directive() {
     "###
     );
 }
+
+#[test]
+fn each_node_in_a_plan_has_its_own_id() {
+    use apollo_federation::query_plan::NodeId;
+    use apollo_federation::query_plan::PlanNode;
+    use apollo_federation::query_plan::TopLevelPlanNode;
+    use apollo_federation::query_plan::query_planner::QueryPlanner;
+    use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
+
+    fn node_ids(node: &PlanNode, ids: &mut Vec<NodeId>) {
+        match node {
+            PlanNode::Fetch(fetch) => ids.push(fetch.node_id),
+            PlanNode::Flatten(flatten) => {
+                ids.push(flatten.node_id);
+                ids.extend(flatten.members.iter().map(|member| member.fetch.node_id));
+            }
+            PlanNode::Sequence(sequence) => {
+                ids.push(sequence.node_id);
+                sequence.nodes.iter().for_each(|node| node_ids(node, ids));
+            }
+            PlanNode::Parallel(parallel) => {
+                ids.push(parallel.node_id);
+                parallel.nodes.iter().for_each(|node| node_ids(node, ids));
+            }
+            PlanNode::Defer(defer) => {
+                ids.push(defer.node_id);
+                let deferred = defer.deferred.iter().map(|deferred| &deferred.node);
+                for node in std::iter::once(&defer.primary.node)
+                    .chain(deferred)
+                    .flatten()
+                {
+                    node_ids(node, ids);
+                }
+            }
+            PlanNode::Condition(condition) => {
+                ids.push(condition.node_id);
+                for node in [&condition.if_clause, &condition.else_clause]
+                    .into_iter()
+                    .flatten()
+                {
+                    node_ids(node, ids);
+                }
+            }
+        }
+    }
+
+    // Reuses supergraphs other tests compose. The query plans a fetch and three flattens under
+    // sequences and a parallel. Each mutation field is planned in a fetch graph of its own, and
+    // each combination of @defer conditions in a plan of its own.
+    let mut defer = QueryPlannerConfig::default();
+    defer.incremental_delivery.enable_defer = true;
+    let cases = [
+        (
+            include_str!("supergraphs/avoids_unnecessary_fetches.graphql"),
+            "{ t { u { v } a { idA1 } } }",
+            QueryPlannerConfig::default(),
+        ),
+        (
+            include_str!("supergraphs/it_executes_mutation_operations_in_sequence.graphql"),
+            "mutation { m2 m1 }",
+            QueryPlannerConfig::default(),
+        ),
+        (
+            include_str!(
+                "supergraphs/defer_test_defer_with_mutliple_conditions_and_labels.graphql"
+            ),
+            r#"query ($cond1: Boolean, $cond2: Boolean) {
+                t {
+                    x
+                    ... @defer(if: $cond1, label: "foo") { y }
+                    ... @defer(if: $cond2, label: "bar") { u { a ... @defer(if: $cond1) { b } } }
+                }
+            }"#,
+            defer,
+        ),
+    ];
+    for (supergraph, operation, config) in cases {
+        let supergraph = apollo_federation::Supergraph::new_with_router_specs(supergraph)
+            .expect("valid supergraph");
+        for incremental in [false, true] {
+            let mut config = config.clone();
+            config.incremental_planner.enabled = incremental;
+            let planner = QueryPlanner::new(&supergraph, config).expect("can create query planner");
+            let document = apollo_compiler::ExecutableDocument::parse_and_validate(
+                planner.api_schema().schema(),
+                operation,
+                "operation.graphql",
+            )
+            .expect("valid operation");
+            let plan = planner
+                .build_query_plan(&document, None, Default::default())
+                .expect("query plan generated");
+
+            let root = match plan.node.expect("a plan") {
+                TopLevelPlanNode::Sequence(node) => PlanNode::Sequence(node),
+                TopLevelPlanNode::Condition(node) => PlanNode::Condition(node),
+                _ => unreachable!("each plan is a sequence or a condition"),
+            };
+            let mut ids = Vec::new();
+            node_ids(&root, &mut ids);
+            let distinct: std::collections::HashSet<_> = ids.iter().collect();
+            assert_eq!(
+                distinct.len(),
+                ids.len(),
+                "{operation}, incremental planner: {incremental}: {ids:?}"
+            );
+        }
+    }
+}

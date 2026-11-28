@@ -851,7 +851,11 @@ fn interpret_flatten_node(
     let Some((path, fetch)) = flatten.single() else {
         // Fetches sent together select the same data as each of them run in parallel.
         let nodes = flatten.batched_fetches();
-        return interpret_parallel_node(context, state, conditions, &ParallelNode { nodes });
+        let parallel = ParallelNode {
+            nodes,
+            node_id: flatten.node_id,
+        };
+        return interpret_parallel_node(context, state, conditions, &parallel);
     };
     let response_shape = interpret_plan_node_at_path(
         context, state, conditions, None, // no type condition at the top level

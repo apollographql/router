@@ -20,5 +20,8 @@ Fetch(
             scopes: [],
             policies: [],
         },
+        node_id: NodeId(
+            0,
+        ),
     },
 )

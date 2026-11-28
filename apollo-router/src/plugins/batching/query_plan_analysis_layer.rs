@@ -167,7 +167,7 @@ fn plan_node_query_hashes(
         new_targets = vec![];
         for target in targets {
             match target {
-                PlanNode::Sequence { nodes } | PlanNode::Parallel { nodes } => {
+                PlanNode::Sequence { nodes, .. } | PlanNode::Parallel { nodes, .. } => {
                     new_targets.extend(nodes);
                 }
                 PlanNode::Fetch(node) => {
@@ -194,6 +194,7 @@ fn plan_node_query_hashes(
                     if_clause,
                     else_clause,
                     condition,
+                    ..
                 } => {
                     if query
                         .variable_value(condition.as_str(), variables)

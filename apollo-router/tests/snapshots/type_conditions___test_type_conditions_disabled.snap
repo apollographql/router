@@ -85,7 +85,8 @@ expression: response
                 "is_authenticated": false,
                 "scopes": [],
                 "policies": []
-              }
+              },
+              "nodeId": 0
             },
             {
               "kind": "Flatten",
@@ -149,12 +150,15 @@ expression: response
                       "is_authenticated": false,
                       "scopes": [],
                       "policies": []
-                    }
+                    },
+                    "nodeId": 1
                   }
                 }
-              ]
+              ],
+              "nodeId": 2
             }
-          ]
+          ],
+          "nodeId": 3
         }
       },
       "text": "QueryPlan {\n  Sequence {\n    Fetch(service: \"searchSubgraph\") {\n      {\n        search {\n          __typename\n          ... on MovieResult {\n            sections {\n              ...c\n            }\n            id\n          }\n          ... on ArticleResult {\n            id\n            sections {\n              ...c\n            }\n          }\n        }\n      }\n\n      fragment a on EntityCollectionSection {\n        __typename\n        id\n      }\n\n      fragment b on GallerySection {\n        __typename\n        id\n      }\n\n      fragment c on Section {\n        __typename\n        ...a\n        ...b\n      }\n    },\n    Flatten(path: \"search.@.sections.@\") {\n      Fetch(service: \"artworkSubgraph\") {\n        {\n          ... on EntityCollectionSection {\n            __typename\n            id\n          }\n          ... on GallerySection {\n            __typename\n            id\n          }\n        } =>\n        {\n          ... on EntityCollectionSection {\n            title\n            artwork(params: $movieResultParam)\n          }\n          ... on GallerySection {\n            artwork(params: $movieResultParam)\n          }\n        }\n      },\n    },\n  },\n}"

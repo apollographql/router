@@ -4,6 +4,7 @@ use std::sync::atomic::Ordering;
 
 use apollo_compiler::collections::HashSet;
 use apollo_compiler::validation::Valid;
+pub(crate) use apollo_federation::query_plan::NodeId;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -100,12 +101,16 @@ pub(crate) enum PlanNode {
     Sequence {
         /// The plan nodes that make up the sequence execution.
         nodes: Vec<PlanNode>,
+        #[serde(default, rename = "nodeId")]
+        node_id: NodeId,
     },
 
     /// These nodes may be executed in parallel.
     Parallel {
         /// The plan nodes that make up the parallel execution.
         nodes: Vec<PlanNode>,
+        #[serde(default, rename = "nodeId")]
+        node_id: NodeId,
     },
 
     /// Fetch some data from a subgraph.
@@ -117,11 +122,15 @@ pub(crate) enum PlanNode {
     Defer {
         primary: Primary,
         deferred: Vec<DeferredNode>,
+        #[serde(default, rename = "nodeId")]
+        node_id: NodeId,
     },
 
     Subscription {
         primary: SubscriptionNode,
         rest: Option<Box<PlanNode>>,
+        #[serde(default, rename = "nodeId")]
+        node_id: NodeId,
     },
 
     #[serde(rename_all = "camelCase")]
@@ -129,14 +138,67 @@ pub(crate) enum PlanNode {
         condition: String,
         if_clause: Option<Box<PlanNode>>,
         else_clause: Option<Box<PlanNode>>,
+        #[serde(default)]
+        node_id: NodeId,
     },
 }
 
 impl PlanNode {
+    /// The largest id of this node or any node under it.
+    pub(crate) fn max_node_id(&self) -> NodeId {
+        let own = match self {
+            Self::Sequence { node_id, .. }
+            | Self::Parallel { node_id, .. }
+            | Self::Defer { node_id, .. }
+            | Self::Subscription { node_id, .. }
+            | Self::Condition { node_id, .. } => *node_id,
+            Self::Fetch(fetch) => fetch.node_id,
+            Self::Flatten(flatten) => flatten
+                .members
+                .iter()
+                .map(|member| member.fetch.node_id)
+                .fold(flatten.node_id, Ord::max),
+        };
+        let primary = match self {
+            Self::Subscription { primary, .. } => primary.node_id,
+            _ => own,
+        };
+        let children: Vec<&PlanNode> = match self {
+            Self::Sequence { nodes, .. } | Self::Parallel { nodes, .. } => nodes.iter().collect(),
+            Self::Defer {
+                primary, deferred, ..
+            } => primary
+                .node
+                .as_deref()
+                .into_iter()
+                .chain(
+                    deferred
+                        .iter()
+                        .filter_map(|deferred| deferred.node.as_deref()),
+                )
+                .collect(),
+            Self::Subscription { rest, .. } => rest.as_deref().into_iter().collect(),
+            Self::Condition {
+                if_clause,
+                else_clause,
+                ..
+            } => [if_clause, else_clause]
+                .into_iter()
+                .flatten()
+                .map(|node| &**node)
+                .collect(),
+            Self::Fetch(_) | Self::Flatten(_) => Vec::new(),
+        };
+        children
+            .into_iter()
+            .map(PlanNode::max_node_id)
+            .fold(own.max(primary), Ord::max)
+    }
+
     pub(crate) fn contains_mutations(&self) -> bool {
         match self {
-            Self::Sequence { nodes } => nodes.iter().any(|n| n.contains_mutations()),
-            Self::Parallel { nodes } => nodes.iter().any(|n| n.contains_mutations()),
+            Self::Sequence { nodes, .. } => nodes.iter().any(|n| n.contains_mutations()),
+            Self::Parallel { nodes, .. } => nodes.iter().any(|n| n.contains_mutations()),
             Self::Fetch(fetch_node) => fetch_node.operation_kind() == &OperationKind::Mutation,
             Self::Defer { primary, .. } => primary
                 .node
@@ -167,8 +229,8 @@ impl PlanNode {
 
     pub(crate) fn is_deferred(&self, variables: &Object, query: &Query) -> bool {
         match self {
-            Self::Sequence { nodes } => nodes.iter().any(|n| n.is_deferred(variables, query)),
-            Self::Parallel { nodes } => nodes.iter().any(|n| n.is_deferred(variables, query)),
+            Self::Sequence { nodes, .. } => nodes.iter().any(|n| n.is_deferred(variables, query)),
+            Self::Parallel { nodes, .. } => nodes.iter().any(|n| n.is_deferred(variables, query)),
             Self::Flatten(_) => false,
             Self::Fetch(..) => false,
             Self::Defer { .. } => true,
@@ -177,6 +239,7 @@ impl PlanNode {
                 if_clause,
                 else_clause,
                 condition,
+                ..
             } => {
                 if query
                     .variable_value(condition.as_str(), variables)
@@ -203,11 +266,13 @@ impl PlanNode {
 
     pub(crate) fn subgraph_fetches(&self) -> usize {
         match self {
-            PlanNode::Sequence { nodes } => nodes.iter().map(|n| n.subgraph_fetches()).sum(),
-            PlanNode::Parallel { nodes } => nodes.iter().map(|n| n.subgraph_fetches()).sum(),
+            PlanNode::Sequence { nodes, .. } => nodes.iter().map(|n| n.subgraph_fetches()).sum(),
+            PlanNode::Parallel { nodes, .. } => nodes.iter().map(|n| n.subgraph_fetches()).sum(),
             PlanNode::Fetch(_) => 1,
             PlanNode::Flatten(_) => 1,
-            PlanNode::Defer { primary, deferred } => {
+            PlanNode::Defer {
+                primary, deferred, ..
+            } => {
                 primary.node.as_ref().map_or(0, |n| n.subgraph_fetches())
                     + deferred
                         .iter()
@@ -245,12 +310,12 @@ impl PlanNode {
                 fetch_node.init_parsed_operation(subgraph_schemas)?;
             }
 
-            PlanNode::Sequence { nodes } => {
+            PlanNode::Sequence { nodes, .. } => {
                 for node in nodes {
                     node.init_parsed_operations(subgraph_schemas)?;
                 }
             }
-            PlanNode::Parallel { nodes } => {
+            PlanNode::Parallel { nodes, .. } => {
                 for node in nodes {
                     node.init_parsed_operations(subgraph_schemas)?;
                 }
@@ -260,7 +325,9 @@ impl PlanNode {
                     member.fetch.init_parsed_operation(subgraph_schemas)?;
                 }
             }
-            PlanNode::Defer { primary, deferred } => {
+            PlanNode::Defer {
+                primary, deferred, ..
+            } => {
                 if let Some(node) = primary.node.as_mut() {
                     node.init_parsed_operations(subgraph_schemas)?;
                 }
@@ -270,7 +337,7 @@ impl PlanNode {
                     }
                 }
             }
-            PlanNode::Subscription { primary, rest } => {
+            PlanNode::Subscription { primary, rest, .. } => {
                 primary.init_parsed_operation(subgraph_schemas)?;
                 if let Some(node) = rest.as_mut() {
                     node.init_parsed_operations(subgraph_schemas)?;
@@ -280,6 +347,7 @@ impl PlanNode {
                 condition: _,
                 if_clause,
                 else_clause,
+                ..
             } => {
                 if let Some(node) = if_clause.as_mut() {
                     node.init_parsed_operations(subgraph_schemas)?;
@@ -301,12 +369,12 @@ impl PlanNode {
                 fetch_node.init_parsed_operation_and_hash_subquery(subgraph_schemas)?;
             }
 
-            PlanNode::Sequence { nodes } => {
+            PlanNode::Sequence { nodes, .. } => {
                 for node in nodes {
                     node.init_parsed_operations_and_hash_subqueries(subgraph_schemas)?;
                 }
             }
-            PlanNode::Parallel { nodes } => {
+            PlanNode::Parallel { nodes, .. } => {
                 for node in nodes {
                     node.init_parsed_operations_and_hash_subqueries(subgraph_schemas)?;
                 }
@@ -318,7 +386,9 @@ impl PlanNode {
                         .init_parsed_operation_and_hash_subquery(subgraph_schemas)?;
                 }
             }
-            PlanNode::Defer { primary, deferred } => {
+            PlanNode::Defer {
+                primary, deferred, ..
+            } => {
                 if let Some(node) = primary.node.as_mut() {
                     node.init_parsed_operations_and_hash_subqueries(subgraph_schemas)?;
                 }
@@ -329,7 +399,9 @@ impl PlanNode {
                     }
                 }
             }
-            PlanNode::Subscription { primary: _, rest } => {
+            PlanNode::Subscription {
+                primary: _, rest, ..
+            } => {
                 if let Some(node) = rest.as_mut() {
                     node.init_parsed_operations_and_hash_subqueries(subgraph_schemas)?;
                 }
@@ -338,6 +410,7 @@ impl PlanNode {
                 condition: _,
                 if_clause,
                 else_clause,
+                ..
             } => {
                 if let Some(node) = if_clause.as_mut() {
                     node.init_parsed_operations_and_hash_subqueries(subgraph_schemas)?;
@@ -356,11 +429,11 @@ impl PlanNode {
     /// Note that duplicates are not filtered.
     pub(crate) fn service_usage<'a>(&'a self) -> Box<dyn Iterator<Item = &'a str> + 'a> {
         match self {
-            Self::Sequence { nodes } | Self::Parallel { nodes } => {
+            Self::Sequence { nodes, .. } | Self::Parallel { nodes, .. } => {
                 Box::new(nodes.iter().flat_map(|x| x.service_usage()))
             }
             Self::Fetch(fetch) => Box::new(Some(fetch.service_name()).into_iter()),
-            Self::Subscription { primary, rest } => match rest {
+            Self::Subscription { primary, rest, .. } => match rest {
                 Some(rest) => Box::new(
                     rest.service_usage()
                         .chain(Some(primary.service_name.as_ref())),
@@ -373,7 +446,9 @@ impl PlanNode {
                     .iter()
                     .map(|member| member.fetch.service_name()),
             ),
-            Self::Defer { primary, deferred } => primary
+            Self::Defer {
+                primary, deferred, ..
+            } => primary
                 .node
                 .as_ref()
                 .map(|n| {
@@ -411,13 +486,13 @@ impl PlanNode {
         let mut stack = vec![self];
         while let Some(node) = stack.pop() {
             match node {
-                Self::Sequence { nodes } | Self::Parallel { nodes } => {
+                Self::Sequence { nodes, .. } | Self::Parallel { nodes, .. } => {
                     stack.extend(nodes.iter());
                 }
                 Self::Fetch(fetch) => {
                     services.insert(fetch.service_name.as_ref());
                 }
-                Self::Subscription { primary, rest } => {
+                Self::Subscription { primary, rest, .. } => {
                     services.insert(primary.service_name.as_ref());
                     if let Some(rest) = rest {
                         stack.push(rest);
@@ -428,7 +503,9 @@ impl PlanNode {
                         services.insert(member.fetch.service_name.as_ref());
                     }
                 }
-                Self::Defer { primary, deferred } => {
+                Self::Defer {
+                    primary, deferred, ..
+                } => {
                     if let Some(primary) = primary.node.as_ref() {
                         stack.push(primary);
                     }
@@ -462,12 +539,12 @@ impl PlanNode {
                 fetch_node.extract_authorization_metadata(schema, directives, key);
             }
 
-            PlanNode::Sequence { nodes } => {
+            PlanNode::Sequence { nodes, .. } => {
                 for node in nodes {
                     node.extract_authorization_metadata(schema, directives, key);
                 }
             }
-            PlanNode::Parallel { nodes } => {
+            PlanNode::Parallel { nodes, .. } => {
                 for node in nodes {
                     node.extract_authorization_metadata(schema, directives, key);
                 }
@@ -479,7 +556,9 @@ impl PlanNode {
                         .extract_authorization_metadata(schema, directives, key);
                 }
             }
-            PlanNode::Defer { primary, deferred } => {
+            PlanNode::Defer {
+                primary, deferred, ..
+            } => {
                 if let Some(node) = primary.node.as_mut() {
                     node.extract_authorization_metadata(schema, directives, key);
                 }
@@ -491,7 +570,9 @@ impl PlanNode {
                     }
                 }
             }
-            PlanNode::Subscription { primary: _, rest } => {
+            PlanNode::Subscription {
+                primary: _, rest, ..
+            } => {
                 if let Some(node) = rest.as_mut() {
                     node.extract_authorization_metadata(schema, directives, key);
                 }
@@ -500,6 +581,7 @@ impl PlanNode {
                 condition: _,
                 if_clause,
                 else_clause,
+                ..
             } => {
                 if let Some(node) = if_clause.as_mut() {
                     node.extract_authorization_metadata(schema, directives, key);
@@ -518,6 +600,8 @@ impl PlanNode {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct FlattenNode {
     pub(crate) members: Vec<FlattenMember>,
+    #[serde(default)]
+    pub(crate) node_id: NodeId,
 }
 
 /// One fetch of a `FlattenNode`, with the paths its response merges at.
@@ -537,6 +621,7 @@ impl FlattenNode {
                 paths: vec![path],
                 fetch,
             }],
+            node_id: Default::default(),
         }
     }
 

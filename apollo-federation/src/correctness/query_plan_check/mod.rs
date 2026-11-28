@@ -430,7 +430,10 @@ impl<'a> Checker<'a> {
                     // what they would run in parallel, each at its paths.
                     let nodes = flatten.batched_fetches();
                     return self.walk_node(
-                        &PlanNode::Parallel(ParallelNode { nodes }),
+                        &PlanNode::Parallel(ParallelNode {
+                            nodes,
+                            node_id: flatten.node_id,
+                        }),
                         reached,
                         available,
                         readable,

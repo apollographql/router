@@ -16,6 +16,7 @@ expression: response
         "kind": "QueryPlan",
         "node": {
           "kind": "Sequence",
+          "nodeId": 6,
           "nodes": [
             {
               "authorization": {
@@ -28,6 +29,7 @@ expression: response
               },
               "id": null,
               "kind": "Fetch",
+              "nodeId": 0,
               "operation": "query QueryUnion__Subgraph1__0 { k { __typename ... on A { __typename prop v { __typename id } } ... on B { __typename prop v { __typename id } } } }",
               "operationKind": "query",
               "operationName": "QueryUnion__Subgraph1__0",
@@ -38,6 +40,7 @@ expression: response
             },
             {
               "kind": "Parallel",
+              "nodeId": 5,
               "nodes": [
                 {
                   "kind": "Flatten",
@@ -81,6 +84,7 @@ expression: response
                           ]
                         },
                         "id": null,
+                        "nodeId": 1,
                         "operation": "query QueryUnion__Subgraph1__1($representations: [_Any!]!, $contextualArgument_1_1: String) { _entities(representations: $representations) { ... on V { field(a: $contextualArgument_1_1) } } }",
                         "operationKind": "query",
                         "operationName": "QueryUnion__Subgraph1__1",
@@ -98,7 +102,8 @@ expression: response
                         ]
                       ]
                     }
-                  ]
+                  ],
+                  "nodeId": 2
                 },
                 {
                   "kind": "Flatten",
@@ -142,6 +147,7 @@ expression: response
                           ]
                         },
                         "id": null,
+                        "nodeId": 3,
                         "operation": "query QueryUnion__Subgraph1__2($representations: [_Any!]!, $contextualArgument_1_1: String) { _entities(representations: $representations) { ... on V { field(a: $contextualArgument_1_1) } } }",
                         "operationKind": "query",
                         "operationName": "QueryUnion__Subgraph1__2",
@@ -159,7 +165,8 @@ expression: response
                         ]
                       ]
                     }
-                  ]
+                  ],
+                  "nodeId": 4
                 }
               ]
             }
