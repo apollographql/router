@@ -398,6 +398,7 @@ Router.APOLLO_SUBSCRIPTION_WS_CUSTOM_CONNECTION_PARAMS // Context key to modify 
 Router.APOLLO_ENTITY_CACHE_KEY // Context key to access the entity cache key
 Router.APOLLO_OPERATION_ID // Context key to get the value of apollo operation id (studio trace id) from the context
 Router.APOLLO_PERSISTED_QUERY_ID_KEY // Context key to get the persisted query ID when the request uses a persisted query
+Router.APOLLO_PERSISTED_QUERY_SOURCE_KEY // Context key to get how the persisted query ID is resolved: `id` when the client sends `extensions.persistedQuery.sha256Hash`, `freeform` when the full query body matches the manifest after normalization. Absent otherwise.
 Router.APOLLO_COST_ESTIMATED_KEY // Context key to get the estimated cost of an operation
 Router.APOLLO_COST_ACTUAL_KEY // Context key to get the actual cost of an operation
 Router.APOLLO_COST_STRATEGY_KEY // Context key to get the strategy used to calculate cost
