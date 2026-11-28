@@ -12,6 +12,8 @@ use apollo_compiler::schema::ExtendedType;
 use hashbrown::HashSet;
 use itertools::Itertools;
 use multi_try::MultiTry;
+use shape::Shape;
+use shape::ShapeCase;
 
 use self::entity::validate_entity_arg;
 use self::selection::Selection;
@@ -23,6 +25,7 @@ use super::errors::IsSuccessArgument;
 use crate::connectors::ConnectSpec;
 use crate::connectors::Namespace;
 use crate::connectors::SourceName;
+use crate::connectors::StreamMode;
 use crate::connectors::id::ConnectedElement;
 use crate::connectors::id::ObjectCategory;
 use crate::connectors::schema_type_ref::SchemaTypeRef;
@@ -357,6 +360,29 @@ impl<'schema> Connect<'schema> {
         }
 
         messages.extend(validate_entity_arg(self.coordinate, self.schema).err());
+
+        // A stream mode decides what `$` is, so the selection is checked against that shape
+        let stream = self.http.as_ref().and_then(Http::stream);
+        let input_shape = stream.map(|stream| stream_input_shape(stream.mode));
+        if let Some((stream, input_shape)) = stream.zip(input_shape.clone()) {
+            if all_variables.contains(&Namespace::Batch) {
+                // `$batch` splits one response across many entities, and nothing yet says how
+                // a list of events should be split
+                messages.push(stream.error("can't be used with `$batch`.", self.schema));
+            } else if expects_one_value(self.coordinate.element)
+                && is_list_shape(&self.selection.output_shape(input_shape))
+            {
+                messages.push(stream.error(
+                    format_args!(
+                        "makes `$` a list of events, and this selection maps every one of them, \
+                        but `{}` resolves one value. Pick one event, for example with `$->last`.",
+                        self.coordinate.element
+                    ),
+                    self.schema,
+                ));
+            }
+        }
+
         if let Some(http) = self.http {
             messages.extend(http.type_check(self.schema).err().into_iter().flatten());
         } else {
@@ -380,7 +406,8 @@ impl<'schema> Connect<'schema> {
             messages.extend(is_success_argument.type_check(self.schema).err());
         }
 
-        let mut seen: Vec<ResolvedField> = match self.selection.type_check(self.schema) {
+        let mut seen: Vec<ResolvedField> = match self.selection.type_check(self.schema, input_shape)
+        {
             // TODO: use ResolvedField struct at all levels
             Ok(seen) => seen
                 .into_iter()
@@ -433,6 +460,41 @@ impl<'schema> Connect<'schema> {
 pub(super) struct ResolvedField {
     pub object_name: Name,
     pub field_name: Name,
+}
+
+/// What `$` is in the selection of a connector with this stream mode.
+fn stream_input_shape(mode: StreamMode) -> Shape {
+    match mode {
+        StreamMode::Array => Shape::list(Shape::unknown([]), []),
+    }
+}
+
+/// Whether the connector resolves a single value rather than a list: a field whose type isn't a
+/// list, or an entity resolved by `@connect` on its type.
+fn expects_one_value(element: ConnectedElement) -> bool {
+    match element {
+        ConnectedElement::Field { field_def, .. } => !field_def.ty.is_list(),
+        ConnectedElement::Type { .. } => true,
+    }
+}
+
+/// Whether every value of this shape is a list, apart from a missing or null one.
+fn is_list_shape(shape: &Shape) -> bool {
+    match shape.case() {
+        ShapeCase::Array { .. } => true,
+        ShapeCase::One(shapes) => {
+            shapes
+                .iter()
+                .any(|shape| matches!(shape.case(), ShapeCase::Array { .. }))
+                && shapes.iter().all(|shape| {
+                    matches!(
+                        shape.case(),
+                        ShapeCase::Array { .. } | ShapeCase::None | ShapeCase::Null
+                    )
+                })
+        }
+        _ => false,
+    }
 }
 
 fn validate_source_name(

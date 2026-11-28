@@ -12,3 +12,6 @@ pub(crate) const PATH_ARGUMENT_NAME: Name = name!("path");
 pub(crate) const QUERY_PARAMS_ARGUMENT_NAME: Name = name!("queryParams");
 
 pub(crate) const URL_PATH_TEMPLATE_SCALAR_NAME: Name = name!("URLTemplate");
+
+/// `http.stream`, added in connect/v0.5
+pub(crate) const STREAM_ARGUMENT_NAME: Name = name!("stream");

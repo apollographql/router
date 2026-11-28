@@ -30,12 +30,15 @@ use super::http::HTTP_HEADER_MAPPING_NAME_IN_SPEC;
 use super::http::HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME;
 use super::http::PATH_ARGUMENT_NAME;
 use super::http::QUERY_PARAMS_ARGUMENT_NAME;
+use super::http::STREAM_ARGUMENT_NAME;
 use super::http::URL_PATH_TEMPLATE_SCALAR_NAME;
 use super::source::BaseUrl;
 use super::source::SOURCE_DIRECTIVE_NAME_IN_SPEC;
 use super::source::SOURCE_HTTP_NAME_IN_SPEC;
 use super::source::SOURCE_NAME_ARGUMENT_NAME;
 use crate::bail;
+use crate::connectors::ConnectSpec;
+use crate::connectors::spec::connect_spec_from_schema;
 use crate::error::FederationError;
 use crate::link::Link;
 use crate::schema::FederationSchema;
@@ -220,11 +223,21 @@ fn source_http_spec() -> InputObjectTypeSpecification {
 //   # added in v0.2
 //   path: JSONSelection
 //   queryParams: JSONSelection
+//
+//   # added in v0.5
+//   stream: String
 // }
 fn connect_http_spec() -> InputObjectTypeSpecification {
     InputObjectTypeSpecification {
         name: CONNECT_HTTP_NAME_IN_SPEC,
-        fields: |_| {
+        fields: |schema| {
+            let stream = (connect_spec_from_schema(schema.schema())
+                .is_some_and(|spec| spec >= ConnectSpec::V0_5))
+            .then_some(ArgumentSpecification {
+                name: STREAM_ARGUMENT_NAME,
+                get_type: |_, _| Ok(ty!(String)),
+                default_value: Default::default(),
+            });
             Vec::from_iter([
                 ArgumentSpecification {
                     name: name!(GET),
@@ -313,6 +326,9 @@ fn connect_http_spec() -> InputObjectTypeSpecification {
                     default_value: Default::default(),
                 },
             ])
+            .into_iter()
+            .chain(stream)
+            .collect()
         },
     }
 }
@@ -1243,5 +1259,39 @@ mod tests {
             subgraph_error.to_string().trim(),
             r###"DIRECTIVE_DEFINITION_INVALID [s1] Invalid definition for directive "@connect": argument "entity" should have type "Boolean" but found type "String""###
         );
+    }
+}
+
+#[cfg(test)]
+mod stream_tests {
+    use apollo_compiler::name;
+    use rstest::rstest;
+
+    use crate::subgraph::typestate::Subgraph;
+
+    /// `ConnectHTTP.stream` only exists from v0.5, so older schemas expand exactly as they did.
+    #[rstest]
+    #[case::v0_4("0.4", false)]
+    #[case::v0_5("0.5", true)]
+    fn connect_http_has_stream_from_v0_5(#[case] version: &str, #[case] expected: bool) {
+        let sdl = format!(
+            r#"
+            type Query {{ hello: String }}
+            extend schema
+              @link(url: "https://specs.apollo.dev/federation/v2.11")
+              @link(url: "https://specs.apollo.dev/connect/v{version}", import: ["@source"])
+            "#
+        );
+
+        let subgraph = Subgraph::parse("s1", "http://s1", &sdl)
+            .expect("parsed successfully")
+            .expand_links()
+            .expect("expanded successfully");
+        let connect_http = subgraph
+            .schema()
+            .schema()
+            .get_input_object("connect__ConnectHTTP")
+            .expect("ConnectHTTP is defined");
+        assert_eq!(connect_http.fields.contains_key(&name!(stream)), expected);
     }
 }
