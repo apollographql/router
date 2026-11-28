@@ -2116,6 +2116,11 @@ where
 
     fn on_response_event(&self, response: &Self::EventResponse, ctx: &Context) {
         let mut inner = self.inner.lock();
+        // `on_response` has already counted this non-event value. Without this return, an event
+        // on which the selector yields nothing falls through and adds the value a second time.
+        if matches!(inner.increment, Increment::Custom(Some(_))) {
+            return;
+        }
         if !inner.condition.evaluate_event_response(response, ctx) {
             return;
         }
@@ -2542,6 +2547,11 @@ where
 
     fn on_response_event(&self, response: &Self::EventResponse, ctx: &Context) {
         let mut inner = self.inner.lock();
+        // `on_response` has already recorded this non-event value. Selectors such as
+        // `response_context` return it again on every event, and that is not a new sample.
+        if matches!(inner.increment, Increment::Custom(Some(_))) {
+            return;
+        }
         if !inner.condition.evaluate_event_response(response, ctx) {
             return;
         }
