@@ -298,6 +298,25 @@ async fn test_extended_references_nested_query() {
 }
 
 #[test(tokio::test)]
+async fn test_extended_references_mixed() {
+    let schema_str = include_str!("testdata/schema_interop.graphql");
+    let query_str = include_str!("testdata/extended_references_mixed.graphql");
+    let query_vars_str = include_str!("testdata/extended_references_mixed.json");
+
+    let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
+    let doc = ExecutableDocument::parse_and_validate(&schema, query_str, "query.graphql").unwrap();
+    let vars: Object = serde_json::from_str(query_vars_str).unwrap();
+
+    let generated = generate_extended_refs(
+        &doc,
+        Some("MixedExtendedReferencesQuery".into()),
+        &schema,
+        Some(&vars),
+    );
+    assert_extended_references!(&generated);
+}
+
+#[test(tokio::test)]
 async fn test_enums_from_response_complex_response_type() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
     let query_str = include_str!("testdata/enums_from_response_complex_response_type.graphql");
