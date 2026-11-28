@@ -1711,6 +1711,7 @@ mod tests {
                     .into(),
                 query: Arc::new(Query::empty_for_tests()),
                 estimated_size: Default::default(),
+                batch_operations: Default::default(),
             };
             let plan = Arc::new(query_plan);
 
@@ -1951,6 +1952,7 @@ mod tests {
             formatted_query_plan: None,
             query: Arc::new(emptied_query),
             estimated_size: Default::default(),
+            batch_operations: Default::default(),
         };
         let (driver, planner_calls) = spawn_counting_planner(handle, Arc::new(emptied_plan));
 

@@ -208,6 +208,7 @@ async fn fetch_includes_operation_name() {
         usage_reporting: UsageReporting::Error("this is a test report key".to_string()).into(),
         query: Arc::new(Query::empty_for_tests()),
         estimated_size: Default::default(),
+        batch_operations: Default::default(),
     };
 
     let succeeded: Arc<AtomicBool> = Default::default();
@@ -267,6 +268,7 @@ async fn fetch_makes_post_requests() {
         usage_reporting: UsageReporting::Error("this is a test report key".to_string()).into(),
         query: Arc::new(Query::empty_for_tests()),
         estimated_size: Default::default(),
+        batch_operations: Default::default(),
     };
 
     let succeeded: Arc<AtomicBool> = Default::default();
@@ -447,6 +449,7 @@ async fn defer() {
         usage_reporting: UsageReporting::Error("this is a test report key".to_string()).into(),
         query: Arc::new(Query::empty_for_tests()),
         estimated_size: Default::default(),
+        batch_operations: Default::default(),
     };
 
     let (mock_x_service, mut handle_x) = tower_test::mock::pair::<
@@ -567,6 +570,7 @@ async fn defer_if_condition() {
         ),
         formatted_query_plan: None,
         estimated_size: Default::default(),
+        batch_operations: Default::default(),
     };
 
     let mocked_accounts = MockSubgraph::builder()
@@ -722,6 +726,7 @@ async fn dependent_mutations() {
         usage_reporting: UsageReporting::Error("this is a test report key".to_string()).into(),
         query: Arc::new(Query::empty_for_tests()),
         estimated_size: Default::default(),
+        batch_operations: Default::default(),
     };
 
     let (mock_a_service, mut handle_a) = tower_test::mock::pair::<
@@ -804,6 +809,7 @@ async fn flatten_with_several_members_is_unsupported() {
         usage_reporting: UsageReporting::Error("this is a test report key".to_string()).into(),
         query: Arc::new(Query::empty_for_tests()),
         estimated_size: Default::default(),
+        batch_operations: Default::default(),
     };
 
     let schema = Arc::new(Schema::parse(schema, &Default::default()).unwrap());
@@ -836,6 +842,63 @@ async fn flatten_with_several_members_is_unsupported() {
         .map(|error| error.extensions.get("code").cloned())
         .collect();
     assert_eq!(codes, vec![Some("UNSUPPORTED_QUERY_PLAN".into())]);
+}
+
+#[test]
+fn a_plan_prepares_the_operation_its_flattens_share() {
+    let schema = "type Query { a: Int b: Int }";
+    let schema = apollo_compiler::Schema::parse_and_validate(schema, "schema.graphql")
+        .expect("valid schema");
+    let mut subgraph_schemas = HashMap::default();
+    subgraph_schemas.insert(
+        "X".to_owned(),
+        query_planner::HashedSubgraphSchema::new(schema),
+    );
+    let fetch = |operation: &str| {
+        format!(
+            r#"{{
+                "serviceName": "X",
+                "fetchKind": {{ "kind": "Root" }},
+                "variableUsages": [],
+                "operation": "{operation}",
+                "operationKind": "query"
+            }}"#
+        )
+    };
+    let mut root: PlanNode = serde_json::from_str(&format!(
+        r#"{{
+            "kind": "Flatten",
+            "members": [
+                {{ "paths": [["x"]], "fetch": {} }},
+                {{ "paths": [["y"]], "fetch": {} }}
+            ]
+        }}"#,
+        fetch("{a}"),
+        fetch("{b}"),
+    ))
+    .expect("plan JSON");
+
+    root.init_parsed_operations_and_hash_subqueries(&subgraph_schemas)
+        .expect("valid operations");
+    let plan = QueryPlan::fake_builder().root(root).build();
+
+    let PlanNode::Flatten(flatten) = plan.root.as_deref().expect("the plan has a root") else {
+        unreachable!("the plan is one flatten node");
+    };
+    let operation = plan
+        .batch_operations()
+        .get(flatten)
+        .expect("the members share an operation");
+    let (operation, _) =
+        query_planner::batch_operation::join(operation.pieces.iter().map(|piece| &**piece));
+    assert_eq!(
+        operation.serialize().no_indent().to_string(),
+        "{ _r0_a: a _r1_b: b }"
+    );
+
+    // A copy of the flatten, such as one in a plan cloned node by node, finds the same operation.
+    let copy = flatten.clone();
+    assert!(plan.batch_operations().get(&copy).is_some());
 }
 
 #[tokio::test]
@@ -1998,6 +2061,7 @@ fn broken_plan_does_not_panic() {
         usage_reporting: UsageReporting::Error("this is a test report key".to_string()).into(),
         query: Arc::new(Query::empty_for_tests()),
         estimated_size: Default::default(),
+        batch_operations: Default::default(),
     };
     let subgraph_schema = apollo_compiler::Schema::parse_and_validate(subgraph_schema, "").unwrap();
     let mut subgraph_schemas = HashMap::default();
@@ -2200,6 +2264,7 @@ async fn defer_depends_skips_fetch_when_typename_missing() {
         usage_reporting: UsageReporting::Error("this is a test report key".to_string()).into(),
         query: Arc::new(Query::empty_for_tests()),
         estimated_size: Default::default(),
+        batch_operations: Default::default(),
     };
 
     // Mock X service: returns the root query data for start

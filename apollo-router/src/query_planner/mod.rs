@@ -16,6 +16,7 @@ pub(crate) use subgraph_context::build_operation_with_aliasing;
 pub use self::fetch::OperationKind;
 use crate::spec::SchemaHash;
 
+pub(crate) mod batch_operation;
 mod caching_query_planner;
 mod convert;
 mod execution;

@@ -429,6 +429,7 @@ impl QueryPlannerService {
             formatted_query_plan,
             query: Arc::new(selections),
             estimated_size: Default::default(),
+            batch_operations: Default::default(),
         }))
     }
 }
@@ -569,6 +570,7 @@ impl QueryPlannerService {
                     formatted_query_plan: None,
                     query: Arc::new(selections),
                     estimated_size: Default::default(),
+                    batch_operations: Default::default(),
                 }));
             }
             FilterResult::Filtered {
