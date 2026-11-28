@@ -136,9 +136,12 @@ fn query_hashes(
     }
 }
 
-/// Iteratively populate a Vec of QueryHashes representing Fetches in this plan.
+/// Iteratively populate a Vec of QueryHashes representing the root Fetches this plan starts
+/// with.
 ///
-/// Do not include any operations which contain "requires" elements.
+/// Do not include any operations which contain "requires" elements. Do not include fetches that
+/// wait on another fetch, after the first step of a sequence or under a flatten: each request of
+/// the batch is held until all of these are sent, so such a fetch would wait on itself.
 ///
 /// # Errors
 /// This function is specifically designed to be used within the context of simple batching. It
@@ -167,7 +170,10 @@ fn plan_node_query_hashes(
         new_targets = vec![];
         for target in targets {
             match target {
-                PlanNode::Sequence { nodes } | PlanNode::Parallel { nodes } => {
+                PlanNode::Sequence { nodes } => {
+                    new_targets.extend(nodes.first());
+                }
+                PlanNode::Parallel { nodes } => {
                     new_targets.extend(nodes);
                 }
                 PlanNode::Fetch(node) => {
@@ -177,16 +183,8 @@ fn plan_node_query_hashes(
                         query_hashes.push(node.schema_aware_hash.clone());
                     }
                 }
-                PlanNode::Flatten(node) => {
-                    for member in &node.members {
-                        let fetch = &member.fetch;
-                        if !fetch.kind.is_entities()
-                            && batching_config.batch_include(&fetch.service_name)
-                        {
-                            query_hashes.push(fetch.schema_aware_hash.clone());
-                        }
-                    }
-                }
+                // A flatten's fetches merge into data an earlier fetch returns.
+                PlanNode::Flatten(_) => {}
                 PlanNode::Defer { .. } | PlanNode::Subscription { .. } => {
                     return Err(BatchingUnsupportedError);
                 }

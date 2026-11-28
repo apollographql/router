@@ -1094,6 +1094,28 @@ async fn it_handles_single_invalid_graphql() -> Result<(), BoxError> {
 }
 
 /// Utility methods for these tests
+/// A plan can fetch from the root of a subgraph below the top of the response, once another
+/// fetch has returned the object it merges into. The batch must not wait for that fetch before
+/// sending the one it depends on.
+#[tokio::test(flavor = "multi_thread")]
+async fn it_batches_a_plan_with_a_root_fetch_below_the_top() -> Result<(), BoxError> {
+    let responses = helper::run_catalog_inventory_batch("{ nested { stockCount } }").await?;
+
+    if graph_os_enabled() {
+        assert_yaml_snapshot!(responses, @r###"
+    ---
+    - data:
+        nested:
+          stockCount: 7
+    - data:
+        nested:
+          stockCount: 7
+    "###);
+    }
+
+    Ok(())
+}
+
 mod helper {
     use std::collections::HashMap;
     use std::ffi::OsString;
@@ -1131,6 +1153,71 @@ mod helper {
                     .respond_with(always_fail)
                     .expect(0)
                     .named(stringify!(batching POST $subgraph_path))
+            }
+        }
+    }
+
+    /// Sends a client batch of two copies of `query` to a router running the incremental
+    /// planner, with catalog and inventory subgraphs that answer any request they get.
+    pub async fn run_catalog_inventory_batch(query: &str) -> Result<Vec<Response>, BoxError> {
+        if !graph_os_enabled() {
+            return Ok(Vec::new());
+        }
+
+        let catalog = MockServer::start().await;
+        wiremock::Mock::given(matchers::method("POST"))
+            .respond_with(answer_each(serde_json::json!({
+                "nested": { "__typename": "Query" },
+                "item": { "__typename": "Item", "id": "1" },
+            })))
+            .mount(&catalog)
+            .await;
+        // Inventory answers under its fields' own keys and their keys in a shared operation.
+        let inventory = MockServer::start().await;
+        wiremock::Mock::given(matchers::method("POST"))
+            .respond_with(answer_each(serde_json::json!({
+                "stockCount": 7,
+                "_entities": [{ "stock": 5 }],
+                "_r0_stockCount": 7,
+                "_r1_stockCount": 7,
+                "_entities0": [{ "stock": 5 }],
+                "_entities1": [{ "stock": 5 }],
+            })))
+            .mount(&inventory)
+            .await;
+
+        let mut router = IntegrationTest::builder()
+            .config(include_str!(
+                "../fixtures/batching/incremental_planner.router.yaml"
+            ))
+            .supergraph("tests/fixtures/batching/catalog_inventory_supergraph.graphql")
+            .subgraph_override("catalog", catalog.uri())
+            .subgraph_override("inventory", inventory.uri())
+            .build()
+            .await;
+        router.start().await;
+        router.assert_started().await;
+
+        let request = Request::fake_builder().query(query).build();
+        let body = serde_json::to_value([request.clone(), request])?;
+        let (_span, response) = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            router.execute_query(Query::builder().body(body).build()),
+        )
+        .await
+        .map_err(|_| "the client batch did not complete")?;
+        serde_json::from_slice::<Vec<Response>>(&response.bytes().await?).map_err(BoxError::from)
+    }
+
+    /// Answers a subgraph request, or each request of a subgraph batch, with `data`.
+    fn answer_each(data: serde_json::Value) -> impl Fn(&wiremock::Request) -> ResponseTemplate {
+        move |request: &wiremock::Request| {
+            let response = serde_json::json!({ "data": data });
+            match request.body_json::<serde_json::Value>() {
+                Ok(serde_json::Value::Array(requests)) => {
+                    ResponseTemplate::new(200).set_body_json(vec![response; requests.len()])
+                }
+                _ => ResponseTemplate::new(200).set_body_json(response),
             }
         }
     }

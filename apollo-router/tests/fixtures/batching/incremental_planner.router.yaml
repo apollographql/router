@@ -1,0 +1,17 @@
+# Subgraph batching with the incremental planner, which sends fetches that start together as one
+# subgraph request.
+
+batching:
+  enabled: true
+  mode: batch_http_link
+  subgraph:
+    all:
+      enabled: true
+
+supergraph:
+  query_planning:
+    incremental_planner:
+      enabled: true
+
+include_subgraph_errors:
+  all: true
