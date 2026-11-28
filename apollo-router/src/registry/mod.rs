@@ -688,6 +688,17 @@ pub(crate) fn create_oci_license_stream(
     Ok(Box::pin(stream_license_from_oci(oci_config)))
 }
 
+/// The repository the entitlement lives in, next to the graph repository: `entitlements/<id>`
+/// under whatever path prefix the graph repository has. A registry that mounts Apollo's
+/// repositories under a prefix (a pull-through cache at `mirror/apollo-remote/<graph>`) holds the
+/// entitlement under that same prefix.
+fn entitlement_repository(graph_repository: &str, entitlement_id: &str) -> String {
+    match graph_repository.rsplit_once('/') {
+        Some((prefix, _graph)) => format!("{prefix}/entitlements/{entitlement_id}"),
+        None => format!("entitlements/{entitlement_id}"),
+    }
+}
+
 fn stream_license_from_oci(
     oci_config: OciConfig,
 ) -> impl Stream<Item = Result<Option<License>, OciError>> {
@@ -788,10 +799,11 @@ fn stream_license_from_oci(
                 // Step 2: Poll the entitlement artifact's `latest` tag and fetch the license
                 GraphManifestState::HasAnnotation => {
                     // Build the license Reference
-                    let license_repository = format!("entitlements/{entitlement_id}");
-                    let registry = graph_reference.registry().to_string();
-                    let license_reference =
-                        Reference::with_tag(registry, license_repository, "latest".to_string());
+                    let license_reference = Reference::with_tag(
+                        graph_reference.registry().to_string(),
+                        entitlement_repository(graph_reference.repository(), &entitlement_id),
+                        "latest".to_string(),
+                    );
 
                     // Compare the old entitlement digest to the new one
                     // Retry if digest not found, otherwise Error
@@ -1602,6 +1614,58 @@ mod tests {
         )
         .await;
         let oci_config = mock_oci_config_with_reference(image_reference.to_string());
+
+        let results = stream_license_from_oci(oci_config)
+            .take(1)
+            .collect::<Vec<_>>()
+            .await;
+
+        assert_eq!(results.len(), 1);
+        let expected = License::from_str(TEST_LICENSE_JWT).expect("test JWT must parse");
+        match &results[0] {
+            Ok(Some(license)) => assert_eq!(license.claims, expected.claims),
+            Ok(None) => panic!("expected a license, got the unlicensed marker"),
+            Err(e) => panic!("expected success, got error: {e}"),
+        }
+    }
+
+    #[test]
+    fn entitlement_repository_keeps_the_graph_repository_prefix() {
+        assert_eq!(
+            entitlement_repository("test-graph-id", "abc"),
+            "entitlements/abc"
+        );
+        assert_eq!(
+            entitlement_repository("mirror/test-graph-id", "abc"),
+            "mirror/entitlements/abc"
+        );
+        assert_eq!(
+            entitlement_repository("mirror/apollo-remote/test-graph-id", "abc"),
+            "mirror/apollo-remote/entitlements/abc"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn stream_license_from_oci_prefixed_mirror_keeps_prefix() {
+        let mock_server = &MockServer::start().await;
+        // A registry that mounts Apollo's repositories under a prefix (a pull-through cache)
+        // holds the graph at mirror/<graph> and the entitlement at mirror/entitlements/<id>;
+        // nothing is mounted at the registry root.
+        let graph_reference = setup_mocks_with_repository(
+            mock_server,
+            "mirror/test-graph-id",
+            vec![],
+            Some(entitlement_annotations(TEST_ENTITLEMENT_ID)),
+        )
+        .await;
+        setup_mocks_with_repository(
+            mock_server,
+            &format!("mirror/entitlements/{TEST_ENTITLEMENT_ID}"),
+            vec![license_layer(TEST_LICENSE_JWT)],
+            None,
+        )
+        .await;
+        let oci_config = mock_oci_config_with_reference(graph_reference.to_string());
 
         let results = stream_license_from_oci(oci_config)
             .take(1)
