@@ -1,0 +1,30 @@
+telemetry:
+  instrumentation:
+    instruments:
+      default_requirement_level: none
+      router:
+        http.server.active_requests: false
+        http.server.request.duration: false
+        # Response-stage condition: a failed request has no response header, so
+        # it must not be counted.
+        "with_response_header":
+          description: "count of responses with x-outcome"
+          type: counter
+          unit: "unit"
+          value: unit
+          attributes:
+            outcome:
+              response_header: "x-outcome"
+          condition:
+            exists:
+              response_header: "x-outcome"
+        # Error-stage condition on the error's message: an unreachable coprocessor.
+        "coprocessor_unreachable":
+          description: "count of requests whose coprocessor couldn't be reached"
+          type: counter
+          unit: "unit"
+          value: unit
+          condition:
+            eq:
+              - "HTTP fetch failed: tcp connect error"
+              - error: reason

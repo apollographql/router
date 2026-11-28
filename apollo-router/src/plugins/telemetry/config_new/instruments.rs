@@ -2171,6 +2171,10 @@ where
 
     fn on_error(&self, error: &BoxError, ctx: &Context) {
         let mut inner = self.inner.lock();
+        if !inner.condition.evaluate_error(error, ctx) {
+            let _ = inner.counter.take();
+            return;
+        }
 
         let mut attrs = inner.attributes.clone();
         if let Some(selectors) = inner.selectors.as_ref() {
@@ -2598,6 +2602,10 @@ where
 
     fn on_error(&self, error: &BoxError, ctx: &Context) {
         let mut inner = self.inner.lock();
+        if !inner.condition.evaluate_error(error, ctx) {
+            let _ = inner.histogram.take();
+            return;
+        }
         let mut attrs = inner.attributes.clone();
         if let Some(selectors) = inner.selectors.as_ref() {
             extend_attributes(&mut attrs, selectors.on_error(error, ctx));
@@ -2870,6 +2878,9 @@ mod tests {
             headers: HashMap<String, String>,
         },
         SupergraphError {
+            error: String,
+        },
+        SubgraphError {
             error: String,
         },
         SubgraphResponse {
@@ -3321,6 +3332,21 @@ mod tests {
                                         .take()
                                         .expect("supergraph request must have been made first")
                                         .on_error(&BoxError::from(error), &context);
+                                }
+                                Event::SubgraphError { error } => {
+                                    let error = BoxError::from(error);
+                                    subgraph_instruments
+                                        .take()
+                                        .expect("subgraph request must have been made first")
+                                        .on_error(&error, &context);
+                                    apollo_subgraph_instruments
+                                        .take()
+                                        .expect("subgraph request must have been made first")
+                                        .on_error(&error, &context);
+                                    cache_instruments
+                                        .take()
+                                        .expect("subgraph request must have been made first")
+                                        .on_error(&error, &context);
                                 }
                                 Event::GraphqlResponse {
                                     data,
