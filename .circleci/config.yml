@@ -123,10 +123,11 @@ parameters:
   quick_nightly:
     type: boolean
     default: false
-  # test_build triggers the standalone `build-test-image` workflow: a single
-  # linux/amd64 Docker image built from whatever branch/commit triggered the
-  # pipeline, tagged by branch+commit (not a release/nightly version), and
-  # pushed to ghcr.io/apollographql/router-test-builds. This is unrelated to
+  # test_build triggers the standalone `build-test-image` workflow: a
+  # multi-platform (linux/amd64 + linux/arm64) Docker image built from whatever
+  # branch/commit triggered the pipeline, tagged by branch+commit (not a
+  # release/nightly version), and pushed to
+  # ghcr.io/apollographql/router-test-builds. This is unrelated to
   # release or nightly versioning -- it exists for ad hoc test builds
   # consumed by the internal testing framework (RTF).
   test_build:
@@ -834,89 +835,8 @@ jobs:
                   pattern: "^https:\\/\\/github\\.com\\/apollographql\\/router.*$"
                   value: << pipeline.project.git_url >>
           steps:
-            - setup_remote_docker:
-                # CircleCI Image Policy
-                #   https://circleci.com/docs/remote-docker-images-support-policy/
-                version: default
-                docker_layer_caching: true
-            - run:
-                name: Docker build
-                command: |
-                  # Source of the new image will be ser to the repo URL.
-                  # This will have the effect of setting org.opencontainers.image.source and org.opencontainers.image.author to the originating pipeline
-                  # Therefore the docker image will have the same permissions as the originating project.
-                  # See: https://docs.github.com/en/packages/learn-github-packages/connecting-a-repository-to-a-package#connecting-a-repository-to-a-container-image-using-the-command-line
-
-                  BASE_VERSION=$(cargo metadata --format-version=1 --no-deps | jq --raw-output '.packages[0].version')
-                  ARTIFACT_FILENAME="router-v${BASE_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
-                  ARTIFACT_URL="https://output.circle-artifacts.com/output/job/${CIRCLE_WORKFLOW_JOB_ID}/artifacts/0/artifacts/${ARTIFACT_FILENAME}"
-                  VERSION="v$(echo "${BASE_VERSION}" | tr "+" "-")"
-                  ROUTER_TAG=ghcr.io/apollographql/nightly/router
-
-                  # Validate local artifact exists and calculate its checksum as a safety net
-                  if [ ! -f "artifacts/${ARTIFACT_FILENAME}" ]; then
-                    echo "Error: Local artifact not found: artifacts/${ARTIFACT_FILENAME}"
-                    exit 1
-                  fi
-                  LOCAL_ARTIFACT_SHA256SUM=$(sha256sum "artifacts/${ARTIFACT_FILENAME}" | cut -d' ' -f1)
-                  echo "Local artifact checksum: ${LOCAL_ARTIFACT_SHA256SUM}"
-
-                  # Download the artifact and calculate its checksum
-                  echo "Downloading artifact to calculate checksum..."
-                  curl -sSL -H "Circle-Token: ${CIRCLE_TOKEN}" -o "router-artifact.tar.gz" "${ARTIFACT_URL}"
-
-                  # Calculate checksum of the tarball (not the binary inside)
-                  ARTIFACT_URL_SHA256SUM=$(sha256sum "router-artifact.tar.gz" | cut -d' ' -f1)
-                  rm -f router-artifact.tar.gz
-
-                  # Compare local vs remote artifact checksums
-                  if [ "${LOCAL_ARTIFACT_SHA256SUM}" != "${ARTIFACT_URL_SHA256SUM}" ]; then
-                    echo "Error: Local and remote artifact checksums don't match!"
-                    echo "Local:      ${LOCAL_ARTIFACT_SHA256SUM}"
-                    echo "Remote: ${ARTIFACT_URL_SHA256SUM}"
-                    exit 1
-                  fi
-                  echo "Local and remote artifact checksums match: ${LOCAL_ARTIFACT_SHA256SUM}"
-
-                  echo "REPO_URL: ${REPO_URL}"
-                  echo "BASE_VERSION: ${BASE_VERSION}"
-                  echo "ARTIFACT_FILENAME: ${ARTIFACT_FILENAME}"
-                  echo "ARTIFACT_URL: ${ARTIFACT_URL}"
-                  echo "ARTIFACT_URL_SHA256SUM: ${ARTIFACT_URL_SHA256SUM}"
-                  echo "LOCAL_ARTIFACT_SHA256SUM: ${LOCAL_ARTIFACT_SHA256SUM}"
-                  echo "VERSION: ${VERSION}"
-                  echo "ROUTER_TAG: ${ROUTER_TAG}"
-
-                  # Create a multi-arch builder which works properly under qemu
-                  docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
-                  docker context create buildx-build
-                  docker buildx create --driver docker-container --use buildx-build
-                  docker buildx inspect --bootstrap
-                  # Note: GH Token owned by apollo-bot2, no expire
-                  echo ${GITHUB_OCI_TOKEN} | docker login ghcr.io -u apollo-bot2 --password-stdin
-                  # TODO: Can't figure out how to build multi-arch image from ARTIFACT_URL right now. Figure out later...
-                  # Build and smoke test the distroless image before pushing anything
-                  docker buildx build --load --platform linux/amd64 --build-arg CIRCLE_TOKEN="${CIRCLE_TOKEN}" --build-arg REPO_URL="${REPO_URL}" --build-arg ARTIFACT_URL="${ARTIFACT_URL}" --build-arg ARTIFACT_URL_SHA256SUM="${ARTIFACT_URL_SHA256SUM}" --build-arg ROUTER_RELEASE=${VERSION} --build-arg BASE_VERSION=${BASE_VERSION} -f dockerfiles/Dockerfile.router.distroless -t ${ROUTER_TAG}:${VERSION}-distroless dockerfiles/.
-                  # There is no shell in the distroless image to debug with, so boot it here and confirm it serves.
-                  ./dockerfiles/verify_distroless_image.sh ${ROUTER_TAG}:${VERSION}-distroless ${BASE_VERSION}
-                  # Build and push debug image
-                  docker buildx build --load --platform linux/amd64 --build-arg CIRCLE_TOKEN="${CIRCLE_TOKEN}" --build-arg REPO_URL="${REPO_URL}" --build-arg ARTIFACT_URL="${ARTIFACT_URL}" --build-arg ARTIFACT_URL_SHA256SUM="${ARTIFACT_URL_SHA256SUM}" --build-arg DEBUG_IMAGE="true" --build-arg ROUTER_RELEASE=${VERSION} --build-arg BASE_VERSION=${BASE_VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION}-debug dockerfiles/.
-                  docker push ${ROUTER_TAG}:${VERSION}-debug
-                  # Build and push release image
-                  docker buildx build --load --platform linux/amd64 --build-arg CIRCLE_TOKEN="${CIRCLE_TOKEN}" --build-arg REPO_URL="${REPO_URL}" --build-arg ARTIFACT_URL="${ARTIFACT_URL}" --build-arg ARTIFACT_URL_SHA256SUM="${ARTIFACT_URL_SHA256SUM}" --build-arg ROUTER_RELEASE=${VERSION} --build-arg BASE_VERSION=${BASE_VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION} dockerfiles/.
-                  docker push ${ROUTER_TAG}:${VERSION}
-                  docker push ${ROUTER_TAG}:${VERSION}-distroless
-
-                  # save containers for analysis
-                  mkdir built-containers
-                  docker save -o built-containers/router_${VERSION}-debug.tar ${ROUTER_TAG}:${VERSION}-debug
-                  docker save -o built-containers/router_${VERSION}.tar ${ROUTER_TAG}:${VERSION}
-                  docker save -o built-containers/router_${VERSION}-distroless.tar ${ROUTER_TAG}:${VERSION}-distroless
-
-            - persist_to_workspace:
-                root: .
-                paths:
-                  - "built-containers/*.tar"
+            # Docker images are built by `build_docker_images`, which needs the
+            # tarballs from both the amd64 and arm64 Linux builds.
             - run:
                 name: Helm build
                 command: |
@@ -1128,98 +1048,212 @@ jobs:
                   VERSION_WITHOUT_LEADING_V="${VERSION#v}"
                   cargo xtask release notes "$VERSION_WITHOUT_LEADING_V" || true
 
-  # Standalone ad hoc test build. Deliberately independent of `build_release`:
-  # no release-versioning (`cargo xtask release prepare`), no nightly/release
-  # tag scheme, no helm chart, no security scan, no notifications. Builds a
-  # single linux/amd64 image from whatever branch/commit triggered the
-  # pipeline and pushes it to a dedicated, non-release image repository for
-  # consumption by the internal testing framework (RTF).
-  build_test_image:
+  # Builds and pushes multi-platform (linux/amd64 + linux/arm64) Router images
+  # from the Linux tarballs that `build_release` persisted to the workspace,
+  # for nightly and ad hoc test builds. Release images are built separately in
+  # `publish_github_release`, from the published release tarballs.
+  #
+  # The tarballs are handed to the build as the `router-artifacts` named build
+  # context (see `dockerfiles/download_and_validate_router.sh`), so each
+  # platform's image gets its own binary. Run this after both the
+  # `amd_linux_build` and `arm_linux_build` variants of `build_release`.
+  #
+  # kind: nightly
+  #   Tags by the nightly version and pushes to ghcr.io/apollographql/nightly/router.
+  #   Saves the amd64 images to the workspace for the Wiz scan.
+  # kind: test
+  #   Tags by branch + short commit sha and pushes to
+  #   ghcr.io/apollographql/router-test-builds, for consumption by the internal
+  #   testing framework (RTF). No release/nightly versioning.
+  build_docker_images:
+    parameters:
+      kind:
+        type: enum
+        enum: [nightly, test]
+    executor: amd_linux_helm
     environment:
       <<: *common_job_environment
-      RELEASE_BIN: router
       REPO_URL: << pipeline.project.git_url >>
-    executor: amd_linux_build
     steps:
-      - checkout
-      - setup_environment:
-          platform: amd_linux_build
-      - run:
-          name: Build router binary
-          command: cargo xtask dist
-      - run:
-          command: mkdir -p artifacts
-      - run:
-          name: Package artifact
-          command: cargo xtask package --output artifacts/
-      - store_artifacts:
-          path: artifacts/
-      - setup_remote_docker:
-          # CircleCI Image Policy
-          #   https://circleci.com/docs/remote-docker-images-support-policy/
-          version: default
-          docker_layer_caching: true
-      - run:
-          name: Docker build and push test image
-          command: |
-            BASE_VERSION=$(cargo metadata --format-version=1 --no-deps | jq --raw-output '.packages[0].version')
-            ARTIFACT_FILENAME="router-v${BASE_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
-            ARTIFACT_URL="https://output.circle-artifacts.com/output/job/${CIRCLE_WORKFLOW_JOB_ID}/artifacts/0/artifacts/${ARTIFACT_FILENAME}"
-            ROUTER_TAG=ghcr.io/apollographql/router-test-builds
+      - when:
+          condition:
+            not:
+              matches:
+                pattern: "^https:\\/\\/github\\.com\\/apollographql\\/router.*$"
+                value: << pipeline.project.git_url >>
+          steps:
+            - run:
+                command: >
+                  echo "Not building Docker images outside of the apollographql/router repositories."
+      - when:
+          condition:
+            matches:
+              pattern: "^https:\\/\\/github\\.com\\/apollographql\\/router.*$"
+              value: << pipeline.project.git_url >>
+          steps:
+            - checkout
+            - setup_environment:
+                platform: amd_linux_helm
+            - attach_workspace:
+                at: workspace
+            - setup_remote_docker:
+                # CircleCI Image Policy
+                #   https://circleci.com/docs/remote-docker-images-support-policy/
+                version: default
+                docker_layer_caching: true
+            - run:
+                name: Docker build
+                environment:
+                  IMAGE_KIND: << parameters.kind >>
+                command: |
+                  set -euo pipefail
 
-            # Tag by branch + short commit sha -- NOT a release/nightly version.
-            # This pipeline has nothing to do with release or nightly versioning.
-            SANITIZED_BRANCH=$(printf '%s' "${CIRCLE_BRANCH}" | tr -c 'a-zA-Z0-9' '-')
-            SHORT_SHA=$(git rev-parse --short=7 HEAD)
-            TAG="${SANITIZED_BRANCH}-${SHORT_SHA}"
+                  # Find the Linux tarballs persisted by `build_release`. Their
+                  # names carry the version, which for nightlies was rewritten
+                  # by `cargo xtask release prepare nightly` in that job.
+                  AMD64_SUFFIX="-x86_64-unknown-linux-gnu.tar.gz"
+                  ARM64_SUFFIX="-aarch64-unknown-linux-gnu.tar.gz"
+                  shopt -s nullglob
+                  AMD64_TARBALLS=(workspace/router-v*"${AMD64_SUFFIX}")
+                  shopt -u nullglob
+                  if [ "${#AMD64_TARBALLS[@]}" -ne 1 ]; then
+                    echo "Error: Expected exactly one router-v*${AMD64_SUFFIX} in the workspace, found ${#AMD64_TARBALLS[@]}"
+                    ls -la workspace
+                    exit 1
+                  fi
+                  AMD64_TARBALL="$(basename "${AMD64_TARBALLS[0]}")"
+                  BASE_VERSION="${AMD64_TARBALL#router-v}"
+                  BASE_VERSION="${BASE_VERSION%"${AMD64_SUFFIX}"}"
+                  ARM64_TARBALL="router-v${BASE_VERSION}${ARM64_SUFFIX}"
+                  if [ ! -f "workspace/${ARM64_TARBALL}" ]; then
+                    echo "Error: Missing ${ARM64_TARBALL} in the workspace; was build_release run for arm_linux_build?"
+                    ls -la workspace
+                    exit 1
+                  fi
 
-            # Validate local artifact exists and calculate its checksum as a safety net
-            if [ ! -f "artifacts/${ARTIFACT_FILENAME}" ]; then
-              echo "Error: Local artifact not found: artifacts/${ARTIFACT_FILENAME}"
-              exit 1
-            fi
-            LOCAL_ARTIFACT_SHA256SUM=$(sha256sum "artifacts/${ARTIFACT_FILENAME}" | cut -d' ' -f1)
-            echo "Local artifact checksum: ${LOCAL_ARTIFACT_SHA256SUM}"
+                  case "${IMAGE_KIND}" in
+                    nightly)
+                      ROUTER_TAG=ghcr.io/apollographql/nightly/router
+                      TAG="v$(echo "${BASE_VERSION}" | tr "+" "-")"
+                      ;;
+                    test)
+                      ROUTER_TAG=ghcr.io/apollographql/router-test-builds
+                      # Tag by branch + short commit sha -- NOT a release/nightly version.
+                      SANITIZED_BRANCH=$(printf '%s' "${CIRCLE_BRANCH}" | tr -c 'a-zA-Z0-9' '-')
+                      SHORT_SHA=$(git rev-parse --short=7 HEAD)
+                      TAG="${SANITIZED_BRANCH}-${SHORT_SHA}"
+                      ;;
+                    *)
+                      echo "Error: Unknown image kind '${IMAGE_KIND}'"
+                      exit 1
+                      ;;
+                  esac
 
-            # Download the artifact and calculate its checksum
-            echo "Downloading artifact to calculate checksum..."
-            curl -sSL -H "Circle-Token: ${CIRCLE_TOKEN}" -o "router-artifact.tar.gz" "${ARTIFACT_URL}"
-            ARTIFACT_URL_SHA256SUM=$(sha256sum "router-artifact.tar.gz" | cut -d' ' -f1)
-            rm -f router-artifact.tar.gz
+                  # Stage only the two Linux tarballs as the build context, with
+                  # checksums that the Docker build validates them against.
+                  ARTIFACTS_DIR=router-artifacts
+                  rm -rf "${ARTIFACTS_DIR}"
+                  mkdir "${ARTIFACTS_DIR}"
+                  cp "workspace/${AMD64_TARBALL}" "workspace/${ARM64_TARBALL}" "${ARTIFACTS_DIR}/"
+                  (cd "${ARTIFACTS_DIR}" && sha256sum ./*.tar.gz | sed 's| \./| |' > sha256sums.txt)
 
-            # Compare local vs remote artifact checksums
-            if [ "${LOCAL_ARTIFACT_SHA256SUM}" != "${ARTIFACT_URL_SHA256SUM}" ]; then
-              echo "Error: Local and remote artifact checksums don't match!"
-              echo "Local:      ${LOCAL_ARTIFACT_SHA256SUM}"
-              echo "Remote: ${ARTIFACT_URL_SHA256SUM}"
-              exit 1
-            fi
-            echo "Local and remote artifact checksums match: ${LOCAL_ARTIFACT_SHA256SUM}"
+                  echo "IMAGE_KIND: ${IMAGE_KIND}"
+                  echo "REPO_URL: ${REPO_URL}"
+                  echo "BASE_VERSION: ${BASE_VERSION}"
+                  echo "TAG: ${TAG}"
+                  echo "ROUTER_TAG: ${ROUTER_TAG}"
+                  echo "Artifacts:"
+                  cat "${ARTIFACTS_DIR}/sha256sums.txt"
 
-            echo "REPO_URL: ${REPO_URL}"
-            echo "BASE_VERSION: ${BASE_VERSION}"
-            echo "TAG: ${TAG}"
-            echo "ROUTER_TAG: ${ROUTER_TAG}"
+                  # Register QEMU emulation for arm64 on the (amd64) remote Docker
+                  # host, so the linux/arm64 build stages can run.
+                  docker run --rm --privileged tonistiigi/binfmt:qemu-v10.2.3 --install arm64
+                  # Create a multi-arch builder
+                  docker context create buildx-build
+                  docker buildx create --driver docker-container --use buildx-build
+                  docker buildx inspect --bootstrap
+                  # Note: GH Token owned by apollo-bot2, no expire
+                  echo ${GITHUB_OCI_TOKEN} | docker login ghcr.io -u apollo-bot2 --password-stdin
 
-            docker context create buildx-build
-            docker buildx create --driver docker-container --use buildx-build
-            docker buildx inspect --bootstrap
-            echo ${GITHUB_OCI_TOKEN} | docker login ghcr.io -u apollo-bot2 --password-stdin
-            # Build and smoke test the distroless image before pushing anything
-            docker buildx build --load --platform linux/amd64 --build-arg CIRCLE_TOKEN="${CIRCLE_TOKEN}" --build-arg REPO_URL="${REPO_URL}" --build-arg ARTIFACT_URL="${ARTIFACT_URL}" --build-arg ARTIFACT_URL_SHA256SUM="${ARTIFACT_URL_SHA256SUM}" --build-arg ROUTER_RELEASE=${TAG} --build-arg BASE_VERSION=${BASE_VERSION} -f dockerfiles/Dockerfile.router.distroless -t ${ROUTER_TAG}:${TAG}-distroless dockerfiles/.
-            # There is no shell in the distroless image to debug with so verify it now
-            ./dockerfiles/verify_distroless_image.sh ${ROUTER_TAG}:${TAG}-distroless ${BASE_VERSION}
-            # Build and push debug image
-            docker buildx build --load --platform linux/amd64 --build-arg CIRCLE_TOKEN="${CIRCLE_TOKEN}" --build-arg REPO_URL="${REPO_URL}" --build-arg ARTIFACT_URL="${ARTIFACT_URL}" --build-arg ARTIFACT_URL_SHA256SUM="${ARTIFACT_URL_SHA256SUM}" --build-arg DEBUG_IMAGE="true" --build-arg ROUTER_RELEASE=${TAG} --build-arg BASE_VERSION=${BASE_VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${TAG}-debug dockerfiles/.
-            docker push ${ROUTER_TAG}:${TAG}-debug
-            # Build and push regular image
-            docker buildx build --load --platform linux/amd64 --build-arg CIRCLE_TOKEN="${CIRCLE_TOKEN}" --build-arg REPO_URL="${REPO_URL}" --build-arg ARTIFACT_URL="${ARTIFACT_URL}" --build-arg ARTIFACT_URL_SHA256SUM="${ARTIFACT_URL_SHA256SUM}" --build-arg ROUTER_RELEASE=${TAG} --build-arg BASE_VERSION=${BASE_VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${TAG} dockerfiles/.
-            docker push ${ROUTER_TAG}:${TAG}
-            docker push ${ROUTER_TAG}:${TAG}-distroless
+                  # Source of the new image will be set to the repo URL.
+                  # This will have the effect of setting org.opencontainers.image.source and org.opencontainers.image.author to the originating pipeline
+                  # Therefore the docker image will have the same permissions as the originating project.
+                  # See: https://docs.github.com/en/packages/learn-github-packages/connecting-a-repository-to-a-package#connecting-a-repository-to-a-container-image-using-the-command-line
+                  BUILD_ARGS=(
+                    --build-context "router-artifacts=${ARTIFACTS_DIR}"
+                    --build-arg "REPO_URL=${REPO_URL}"
+                    --build-arg "ROUTER_RELEASE=${TAG}"
+                    --build-arg "BASE_VERSION=${BASE_VERSION}"
+                  )
+                  PLATFORMS=linux/amd64,linux/arm64
 
-            echo "Pushed: ${ROUTER_TAG}:${TAG}"
-            echo "Pushed: ${ROUTER_TAG}:${TAG}-debug"
-            echo "Pushed: ${ROUTER_TAG}:${TAG}-distroless"
+                  # Smoke test the distroless image before publishing anything.
+                  # There is no shell in it to debug with, so boot it here and confirm it serves.
+                  docker buildx build --load --platform linux/amd64 "${BUILD_ARGS[@]}" -f dockerfiles/Dockerfile.router.distroless -t "${ROUTER_TAG}:${TAG}-distroless" dockerfiles/.
+                  ./dockerfiles/verify_distroless_image.sh "${ROUTER_TAG}:${TAG}-distroless" "${BASE_VERSION}"
+
+                  # Build and push debug image
+                  docker buildx build --push --platform "${PLATFORMS}" "${BUILD_ARGS[@]}" --build-arg DEBUG_IMAGE="true" -f dockerfiles/Dockerfile.router -t "${ROUTER_TAG}:${TAG}-debug" dockerfiles/.
+                  # Build and push regular image
+                  docker buildx build --push --platform "${PLATFORMS}" "${BUILD_ARGS[@]}" -f dockerfiles/Dockerfile.router -t "${ROUTER_TAG}:${TAG}" dockerfiles/.
+                  # Build and push distroless image
+                  docker buildx build --push --platform "${PLATFORMS}" "${BUILD_ARGS[@]}" -f dockerfiles/Dockerfile.router.distroless -t "${ROUTER_TAG}:${TAG}-distroless" dockerfiles/.
+
+                  echo "Pushed (${PLATFORMS}): ${ROUTER_TAG}:${TAG}"
+                  echo "Pushed (${PLATFORMS}): ${ROUTER_TAG}:${TAG}-debug"
+                  echo "Pushed (${PLATFORMS}): ${ROUTER_TAG}:${TAG}-distroless"
+
+                  if [ "${IMAGE_KIND}" = "nightly" ]; then
+                    # Save the amd64 images for the Wiz scan. A multi-platform
+                    # image can't be loaded into the daemon, so load the amd64
+                    # variants (cached from the builds above) and save those.
+                    docker buildx build --load --platform linux/amd64 "${BUILD_ARGS[@]}" --build-arg DEBUG_IMAGE="true" -f dockerfiles/Dockerfile.router -t "${ROUTER_TAG}:${TAG}-debug" dockerfiles/.
+                    docker buildx build --load --platform linux/amd64 "${BUILD_ARGS[@]}" -f dockerfiles/Dockerfile.router -t "${ROUTER_TAG}:${TAG}" dockerfiles/.
+                    mkdir -p built-containers
+                    docker save -o "built-containers/router_${TAG}-debug.tar" "${ROUTER_TAG}:${TAG}-debug"
+                    docker save -o "built-containers/router_${TAG}.tar" "${ROUTER_TAG}:${TAG}"
+                    docker save -o "built-containers/router_${TAG}-distroless.tar" "${ROUTER_TAG}:${TAG}-distroless"
+                  fi
+            - when:
+                condition:
+                  equal: [nightly, << parameters.kind >>]
+                steps:
+                  - persist_to_workspace:
+                      root: .
+                      paths:
+                        - "built-containers/*.tar"
+      - when:
+          condition:
+            equal: [nightly, << parameters.kind >>]
+          steps:
+            - slack/notify:
+                event: fail
+                custom: |
+                  {
+                    "blocks": [
+                      {
+                        "type": "section",
+                        "text": {
+                          "type": "mrkdwn",
+                          "text": ":x: A `nightly` Docker image build has *failed* for `${CIRCLE_JOB}` on `${CIRCLE_PROJECT_REPONAME}`'s `${CIRCLE_BRANCH}`!"
+                        }
+                      },
+                      {
+                        "type": "actions",
+                        "elements": [
+                          {
+                            "type": "button",
+                            "action_id": "success_tagged_deploy_view",
+                            "text": {
+                              "type": "plain_text",
+                              "text": "View Job"
+                            },
+                            "url": "${CIRCLE_BUILD_URL}"
+                          }
+                        ]
+                      }
+                    ]
+                  }
 
 workflows:
   ci_checks:
@@ -1264,6 +1298,8 @@ workflows:
     when: << pipeline.parameters.quick_nightly >>
     jobs:
       - build_release:
+          # Named explicitly so `build_docker_images` can require the Linux variants
+          name: build_release-<< matrix.platform >>
           nightly: true
           context:
             - router
@@ -1272,6 +1308,15 @@ workflows:
             parameters:
               platform:
                 [macos_build, windows_build, amd_linux_build, arm_linux_build]
+      - build_docker_images:
+          kind: nightly
+          # Only the Linux tarballs go into the images
+          requires:
+            - build_release-amd_linux_build
+            - build_release-arm_linux_build
+          context:
+            - router
+            - orb-publishing
   nightly:
     when: << pipeline.parameters.nightly >>
     jobs:
@@ -1303,6 +1348,8 @@ workflows:
               platform:
                 [macos_test, windows_test, amd_linux_test, arm_linux_test]
       - build_release:
+          # Named explicitly so `build_docker_images` can require the Linux variants
+          name: build_release-<< matrix.platform >>
           requires:
             - test
             - check_helm
@@ -1315,13 +1362,22 @@ workflows:
             parameters:
               platform:
                 [macos_build, windows_build, amd_linux_build, arm_linux_build]
+      - build_docker_images:
+          kind: nightly
+          # Only the Linux tarballs go into the images
+          requires:
+            - build_release-amd_linux_build
+            - build_release-arm_linux_build
+          context:
+            - router
+            - orb-publishing
       - secops/wiz-docker:
           context:
             - platform-docker-ro
             - wiz
             - github-orb
           requires:
-            - build_release
+            - build_docker_images
           container-dir: /tmp/workspace/built-containers
           # Disables all PR comments from this job
           do-pr-comments: false
@@ -1439,7 +1495,16 @@ workflows:
   build-test-image:
     when: << pipeline.parameters.test_build >>
     jobs:
-      - build_test_image:
+      # With `nightly` left false, this only builds and packages the binaries:
+      # no release/nightly versioning, no helm chart, no notifications.
+      - build_release:
+          matrix:
+            parameters:
+              platform: [amd_linux_build, arm_linux_build]
+      - build_docker_images:
+          kind: test
+          requires:
+            - build_release
           context:
             - router
             - orb-publishing
