@@ -80,6 +80,7 @@ pub(crate) use self::acquire::create_query_planner;
 use self::acquire::maybe_bootstrap_telemetry;
 pub(crate) use self::acquire::parse_http_client_inputs;
 pub(crate) use self::plugins::create_plugins;
+pub(crate) use self::stages::HttpClientTarget;
 pub(crate) use self::stages::build_apq_expander;
 #[cfg(test)]
 pub(crate) use self::stages::build_connector_request_services;

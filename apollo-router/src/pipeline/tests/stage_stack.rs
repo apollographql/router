@@ -12,6 +12,7 @@ use tower::ServiceExt;
 use tower_test::mock::Mock;
 
 use crate::Configuration;
+use crate::pipeline::HttpClientTarget;
 use crate::pipeline::build_connector_request_services;
 use crate::pipeline::build_http_client_service;
 use crate::pipeline::build_subgraph_services;
@@ -51,20 +52,31 @@ async fn stage_plugins(plugins: &[(&str, serde_json::Value)]) -> Plugins {
     registry
 }
 
-/// Every mandatory plugin the stack builders apply, with traffic shaping left at its defaults.
+/// Every mandatory plugin the stack builders apply, at their defaults.
 pub(crate) async fn required_stage_plugins() -> Arc<Plugins> {
-    required_stage_plugins_with_limits(serde_json::json!({})).await
+    required_stage_plugins_with(&[]).await
 }
 
-async fn required_stage_plugins_with_limits(limits: serde_json::Value) -> Arc<Plugins> {
-    Arc::new(
-        stage_plugins(&[
-            (APOLLO_TRAFFIC_SHAPING, serde_json::json!({})),
-            ("apollo.limits", limits),
-            ("apollo.batching", serde_json::json!({})),
-        ])
-        .await,
-    )
+/// Every mandatory plugin the stack builders apply, each built from its entry in `plugins`, or
+/// else at its defaults.
+async fn required_stage_plugins_with(plugins: &[(&str, serde_json::Value)]) -> Arc<Plugins> {
+    Arc::new(required_stage_plugin_registry(plugins).await)
+}
+
+/// Like [`required_stage_plugins_with`], as a registry the caller can still add plugins to.
+pub(crate) async fn required_stage_plugin_registry(
+    plugins: &[(&str, serde_json::Value)],
+) -> Plugins {
+    let defaults = [
+        (APOLLO_TRAFFIC_SHAPING, serde_json::json!({})),
+        ("apollo.batching", serde_json::json!({})),
+        ("apollo.limits", serde_json::json!({})),
+    ];
+    let defaults = defaults
+        .into_iter()
+        .filter(|(name, _)| !plugins.iter().any(|(configured, _)| configured == name));
+    let plugins: Vec<_> = defaults.chain(plugins.iter().cloned()).collect();
+    stage_plugins(&plugins).await
 }
 
 /// The mandatory plugins the query parsing service applies, at their defaults and without a
@@ -170,12 +182,12 @@ pub(crate) async fn source_services(
 /// A subgraph HTTP client for `name`, built from default configuration by the pipeline's own
 /// [`build_http_client_service`] with every mandatory plugin in the registry.
 pub(crate) async fn test_http_client_service(name: &str) -> crate::services::http::BoxCloneService {
-    test_http_client_service_with_limits(name, serde_json::json!({})).await
+    test_http_client_service_with(name, &[]).await
 }
 
-pub(crate) async fn test_http_client_service_with_limits(
+pub(crate) async fn test_http_client_service_with(
     name: &str,
-    limits: serde_json::Value,
+    plugins: &[(&str, serde_json::Value)],
 ) -> crate::services::http::BoxCloneService {
     let inputs = crate::services::http::service::HttpClientInputs::for_subgraph(
         name,
@@ -186,8 +198,8 @@ pub(crate) async fn test_http_client_service_with_limits(
     )
     .unwrap();
     build_http_client_service(
-        name,
+        HttpClientTarget::Subgraph(name),
         inputs,
-        required_stage_plugins_with_limits(limits).await,
+        required_stage_plugins_with(plugins).await,
     )
 }

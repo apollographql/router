@@ -18,8 +18,6 @@ use apollo_federation::connectors::runtime::responses::handle_raw_response;
 use axum::body::HttpBody;
 use http::response::Parts;
 use http_body_util::BodyExt;
-use http_body_util::LengthLimitError;
-use http_body_util::Limited;
 use opentelemetry::KeyValue;
 use parking_lot::Mutex;
 use serde_json_bytes::Map;
@@ -33,7 +31,7 @@ use crate::plugins::connectors::declared_errors::DECLARED_ERROR_MARKER;
 use crate::plugins::connectors::declared_errors::HasDeclaredErrors;
 use crate::plugins::include_subgraph_errors::IncludeSubgraphErrors;
 use crate::plugins::include_subgraph_errors::effective_config::EffectiveConfig;
-use crate::plugins::limits::ConnectorResponseSizeLimit;
+use crate::plugins::limits::response_size_limit::ResponseSizeLimitError;
 use crate::plugins::telemetry::config_new::attributes::HTTP_RESPONSE_BODY;
 use crate::plugins::telemetry::config_new::attributes::HTTP_RESPONSE_HEADERS;
 use crate::plugins::telemetry::config_new::attributes::HTTP_RESPONSE_STATUS;
@@ -143,40 +141,20 @@ where
                 )
             };
 
-            let response_size_limit = context
-                .extensions()
-                .with_lock(|e| e.get::<ConnectorResponseSizeLimit>().copied());
-
             // Whether the body failed to arrive in full for a reason of the source's own, as
             // opposed to the router cutting it off at the response size limit.
             let mut body_incomplete = false;
-            let body_result: Result<_, Box<RuntimeError>> = match response_size_limit {
-                Some(ConnectorResponseSizeLimit(limit)) => {
-                    Limited::new(body, limit)
-                        .collect()
-                        .await
-                        .map_err(|e| {
-                            if e.downcast_ref::<LengthLimitError>().is_some() {
-                                u64_counter!(
-                                    "apollo.router.limits.connector_response_size.exceeded",
-                                    "Number of connector responses aborted because they exceeded the configured response size limit",
-                                    1,
-                                    "connector.source" = connector.source_config_key()
-                                );
-                                tracing::Span::current()
-                                    .record("apollo.connector.response.aborted", "response_size_limit");
-                                make_limit_err(limit)
-                            } else {
-                                body_incomplete = true;
-                                make_invalid_response_err()
-                            }
-                        })
-                }
-                None => body.collect().await.map_err(|_| {
+            let body_result: Result<_, Box<RuntimeError>> = body.collect().await.map_err(|err| {
+                let err: tower::BoxError = err.into();
+                if let Some(exceeded) = ResponseSizeLimitError::find(err.as_ref()) {
+                    tracing::Span::current()
+                        .record("apollo.connector.response.aborted", "response_size_limit");
+                    make_limit_err(exceeded.limit())
+                } else {
                     body_incomplete = true;
                     make_invalid_response_err()
-                }),
-            };
+                }
+            });
             if body_incomplete && let TransportOutcome::Response(http_response) = &mut outcome {
                 http_response
                     .inner
@@ -2451,61 +2429,38 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn process_response_under_size_limit() {
-        use crate::plugins::limits::ConnectorResponseSizeLimit;
-
-        let ctx = Context::new();
-        ctx.extensions()
-            .with_lock(|e| e.insert(ConnectorResponseSizeLimit(1000)));
-
-        let key = ResponseKey::RootField {
-            name: "hello".to_string(),
-            inputs: Default::default(),
-            selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
-        };
-        let response = http::Response::builder()
-            .body(router::body::from_bytes(r#"{"data":"world"}"#))
-            .unwrap();
-
-        let result = process_response(
-            Ok(response),
-            key,
-            make_connector(),
-            &ctx,
-            (None, Default::default()),
-            None,
-            make_supergraph_request(),
-            Default::default(),
-        )
-        .await;
-
-        let graphql_response =
-            super::aggregate_responses(vec![result.mapped_response], Context::new())
-                .unwrap()
-                .response;
-        assert!(
-            graphql_response.body().errors.is_empty(),
-            "expected no errors when response is under the limit"
-        );
-    }
-
-    #[tokio::test]
     async fn process_response_exceeds_size_limit() {
-        use crate::plugins::limits::ConnectorResponseSizeLimit;
+        use tower::Layer as _;
+        use tower::ServiceExt as _;
+
+        use crate::pipeline::HttpClientTarget;
+        use crate::plugins::limits::response_size_limit::ResponseSizeLimitLayer;
 
         let ctx = Context::new();
-        // Limit of 5 bytes — well under the response body size
-        ctx.extensions()
-            .with_lock(|e| e.insert(ConnectorResponseSizeLimit(5)));
 
         let key = ResponseKey::RootField {
             name: "hello".to_string(),
             inputs: Default::default(),
             selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
         };
-        let response = http::Response::builder()
-            .body(router::body::from_bytes(r#"{"data":"world"}"#))
-            .unwrap();
+        // Limit of 5 bytes — well under the response body size
+        let response =
+            ResponseSizeLimitLayer::new(HttpClientTarget::ConnectorSource("subgraph.api"), 5)
+                .layer(tower::service_fn(|_| async {
+                    Ok::<_, tower::BoxError>(crate::services::http::HttpResponse {
+                        http_response: http::Response::builder()
+                            .body(router::body::from_bytes(r#"{"data":"world"}"#))
+                            .unwrap(),
+                        context: Context::new(),
+                    })
+                }))
+                .oneshot(crate::services::http::HttpRequest {
+                    http_request: http::Request::new(router::body::empty()),
+                    context: Context::new(),
+                })
+                .await
+                .unwrap()
+                .http_response;
 
         let result = process_response(
             Ok(response),
