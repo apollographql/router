@@ -44,6 +44,7 @@ use crate::link::Import;
 use crate::link::Link;
 use crate::link::federation_spec_definition::FEDERATION_OPERATION_TYPES;
 use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
+use crate::link::inaccessible_spec_definition::IsInaccessibleExt;
 use crate::link::join_spec_definition::JOIN_DIRECTIVE_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::join_spec_definition::JOIN_FIELD_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::join_spec_definition::JOIN_GRAPH_ARGUMENT_NAME;
@@ -1773,6 +1774,56 @@ impl Merger {
         }))
     }
 
+    /// Whether any subgraph applies @inaccessible to an element at one of `positions` or to its
+    /// parent. Applying it in a single subgraph hides the element in the supergraph. Reading the
+    /// subgraphs rather than the merged schema keeps the answer correct before the element has
+    /// been merged. Every position must exist in its subgraph.
+    pub(in crate::merger) fn is_inaccessible_in_any_subgraph<P: IsInaccessibleExt>(
+        &self,
+        positions: impl IntoIterator<Item = (usize, P)>,
+    ) -> Result<bool, FederationError> {
+        for (idx, pos) in positions {
+            let Some(subgraph) = self.subgraphs.get(idx) else {
+                continue;
+            };
+            let Some(inaccessible) = subgraph.inaccessible_directive_name() else {
+                continue;
+            };
+            if pos.is_inaccessible(subgraph.schema(), &inaccessible)? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    // Clients cannot select an @inaccessible field, and internal uses such as @requires are
+    // checked by satisfiability, so a partially defined one is an intentional rollout rather than
+    // something to hint about. This matches how input object fields are merged.
+    fn is_value_type_field_inaccessible(
+        &self,
+        sources: &Sources<ObjectOrInterfaceTypeDefinitionPosition>,
+        field: &ObjectOrInterfaceFieldDefinitionPosition,
+    ) -> Result<bool, FederationError> {
+        let defining_types: Vec<(usize, ObjectOrInterfaceTypeDefinitionPosition)> = sources
+            .iter()
+            .filter_map(|(idx, source)| {
+                let source = source.as_ref()?;
+                let types = &self.subgraphs[*idx].schema().schema().types;
+                types
+                    .contains_key(source.type_name())
+                    .then(|| (*idx, source.clone()))
+            })
+            .collect();
+        // The type check covers subgraphs that hide the whole type without defining the field.
+        let defining_fields = defining_types.iter().filter_map(|(idx, ty)| {
+            let field = ty.field(field.field_name().clone());
+            field.try_get(self.subgraphs[*idx].schema().schema())?;
+            Some((*idx, field))
+        });
+        Ok(self.is_inaccessible_in_any_subgraph(defining_fields)?
+            || self.is_inaccessible_in_any_subgraph(defining_types.iter().cloned())?)
+    }
+
     pub(crate) fn hint_on_inconsistent_value_type_field(
         &mut self,
         sources: &Sources<ObjectOrInterfaceTypeDefinitionPosition>,
@@ -1818,6 +1869,7 @@ impl Merger {
                 && !subgraph.is_interface_object_type(&source.clone().into())
                 && !matches!(dest, ObjectOrInterfaceTypeDefinitionPosition::Interface(_)
                     if self.is_field_provided_by_an_interface_object(field.field_name(), dest.type_name()))
+                && !self.is_value_type_field_inaccessible(sources, field)?
             {
                 self.error_reporter.report_mismatch_hint(
                         hint_id.clone(),

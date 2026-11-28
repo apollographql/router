@@ -220,7 +220,9 @@ impl Merger {
                 );
                 value_pos.remove(&mut self.merged)?;
             }
-            EnumTypeUsage::Output { .. } | EnumTypeUsage::Unused => {
+            // An @inaccessible value is not exposed to clients, so defining it in only some
+            // subgraphs is an intentional rollout, as for input enums above.
+            EnumTypeUsage::Output { .. } | EnumTypeUsage::Unused if !is_inaccessible => {
                 self.hint_on_inconsistent_output_enum_value(
                     sources,
                     &value_pos.type_name,

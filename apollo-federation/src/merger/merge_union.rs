@@ -6,6 +6,7 @@ use crate::error::FederationError;
 use crate::merger::hints::HintCode;
 use crate::merger::merge::Merger;
 use crate::merger::merge::Sources;
+use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::UnionTypeDefinitionPosition;
 
 impl Merger {
@@ -39,10 +40,38 @@ impl Merger {
             .collect();
         for member_name in member_names {
             self.add_join_union_member(&sources, dest, &member_name)?;
-            self.hint_on_inconsistent_union_member(&sources, dest, &member_name);
+            self.hint_on_inconsistent_union_member(&sources, dest, &member_name)?;
         }
 
         Ok(())
+    }
+
+    // Unions are merged before object types, so the member's @inaccessible is not on the merged
+    // schema yet and has to be read from the subgraphs.
+    fn is_union_member_inaccessible(
+        &self,
+        sources: &Sources<Node<UnionType>>,
+        dest: &UnionTypeDefinitionPosition,
+        member_name: &Node<Name>,
+    ) -> Result<bool, FederationError> {
+        let defining_unions = sources
+            .iter()
+            .filter(|(_, source)| source.is_some())
+            .map(|(idx, _)| (*idx, dest.clone()));
+        let member = ObjectTypeDefinitionPosition {
+            type_name: (**member_name).clone(),
+        };
+        let defining_members = self
+            .subgraphs
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, subgraph)| {
+                member
+                    .try_get(subgraph.schema().schema())
+                    .map(|_| (idx, member.clone()))
+            });
+        Ok(self.is_inaccessible_in_any_subgraph(defining_unions)?
+            || self.is_inaccessible_in_any_subgraph(defining_members)?)
     }
 
     /// Add @join__unionMember directive to union members
@@ -80,10 +109,13 @@ impl Merger {
         sources: &Sources<Node<UnionType>>,
         dest: &UnionTypeDefinitionPosition,
         member_name: &Node<Name>,
-    ) {
+    ) -> Result<(), FederationError> {
         for union_type in sources.values().flatten() {
             // As soon as we find a subgraph that has the union type but not the member, we hint
             if !union_type.members.contains(member_name) {
+                if self.is_union_member_inaccessible(sources, dest, member_name)? {
+                    return Ok(());
+                }
                 self.error_reporter.report_mismatch_hint(
                     HintCode::InconsistentUnionMember,
 format!(
@@ -106,9 +138,10 @@ format!(
                     false,
                     false,
                 );
-                return;
+                return Ok(());
             }
         }
+        Ok(())
     }
 }
 
